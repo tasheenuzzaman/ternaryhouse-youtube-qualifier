@@ -271,3 +271,87 @@ export function channelPage({ header, cards, selectedSort = 0, sortLabels }) {
   </div></ytd-two-column-browse-results-renderer>
 </ytd-browse></ytd-page-manager></div></ytd-app>`;
 }
+
+/* ------------------------------------------------------------------ *
+ * Patterns from REAL YouTube (Chrome DevTools outerHTML excerpts,
+ * @TvMisericordiaPL Videos -> Latest, captured 2026-10-10 by the founder).
+ *
+ * VERBATIM from the excerpts: the outer <yt-lockup-view-model> classes, the
+ * `content-id-<ID>` wrapper class, the metadata container classes, and the
+ * timestamp <span> element exactly as captured — for a published video
+ * `aria-label="2 hours ago"` with visible text "2h ago"; for a scheduled
+ * Premiere no aria-label and "Premieres 10/11/26, 1:00<U+202F>AM" — plus a
+ * duplicate timestamp span, the runtime "7:32", the "Upcoming" badge text and
+ * a "Notify me" control.
+ * RECONSTRUCTED (not in the excerpts): the title heading, thumbnail and
+ * button wrappers around those elements.
+ * ------------------------------------------------------------------ */
+
+const REAL_STAMP_CLASS = 'ytAttributedStringHost ytContentMetadataViewModelMetadataText ytContentMetadataViewModelMetadataTextLastPart ytAttributedStringWhiteSpacePreWrap ytAttributedStringLinkInheritColor';
+
+/** The real timestamp span: `label` null means no aria-label (as on the Premiere). */
+export function realStampSpan(text, label = null) {
+  return `<span class="${REAL_STAMP_CLASS}" dir="auto"${label === null ? '' : ` aria-label="${esc(label)}"`} role="text">${esc(text)}</span>`;
+}
+
+/**
+ * A card in the real Oct-2026 lockup shape.
+ * opts: id, title, badge, stampText, stampLabel (null = none), button,
+ *       duplicateStamp (default true), views
+ */
+export function realLockupCard(o) {
+  const stamp = realStampSpan(o.stampText, o.stampLabel ?? null);
+  const views = o.views === null ? '' : `<span class="ytAttributedStringHost ytContentMetadataViewModelMetadataText" dir="auto" role="text">${esc(o.views || '1.2K views')}</span><span class="ytContentMetadataViewModelDelimiter" aria-hidden="true"> • </span>`;
+  const button = !o.button ? '' : `<div class="ytLockupMetadataViewModelButton"><button-view-model class="ytSpecButtonViewModelHost"><button class="ytSpecButtonShapeNextHost" aria-label="${esc(o.button)}"><div class="ytSpecButtonShapeNextButtonTextContent">${esc(o.button)}</div></button></button-view-model></div>`;
+  return `
+<ytd-rich-item-renderer class="style-scope ytd-rich-grid-renderer" lockup="true" rendered-from-rich-grid="">
+  <div id="content" class="style-scope ytd-rich-item-renderer">
+    <yt-lockup-view-model class="ytd-rich-item-renderer lockup ytLockupViewModelWrapper">
+      <div class="ytLockupViewModelHost ytLockupViewModelVertical content-id-${o.id}">
+        <a href="/watch?v=${o.id}" class="ytLockupViewModelContentImage" aria-hidden="true" tabindex="-1">
+          <yt-thumbnail-view-model class="ytThumbnailViewModelHost"><div class="ytThumbnailViewModelImage"><img alt=""></div>
+            <yt-thumbnail-overlay-badge-view-model><yt-thumbnail-badge-view-model><badge-shape class="ytBadgeShapeHost ytBadgeShapeThumbnailDefault" role="img"><div class="ytBadgeShapeText">${esc(o.badge)}</div></badge-shape></yt-thumbnail-badge-view-model></yt-thumbnail-overlay-badge-view-model>
+          </yt-thumbnail-view-model>
+        </a>
+        <div class="ytLockupViewModelMetadata">
+          <yt-lockup-metadata-view-model class="ytLockupMetadataViewModelHost">
+            <div class="ytLockupMetadataViewModelTextContainer">
+              <h3 class="ytLockupMetadataViewModelHeadingReset" title="${esc(o.title)}"><a href="/watch?v=${o.id}" class="ytLockupMetadataViewModelTitle"><span class="ytAttributedStringHost" role="text">${esc(o.title)}</span></a></h3>
+              <div class="ytLockupMetadataViewModelMetadata">
+                <yt-content-metadata-view-model class="ytContentMetadataViewModelHost">
+                  <div class="ytContentMetadataViewModelMetadataRow">${views}${stamp}</div>${o.duplicateStamp === false ? '' : stamp}
+                </yt-content-metadata-view-model>
+              </div>${button}
+            </div>
+            <div class="ytLockupMetadataViewModelMenuButton"><button-view-model><button aria-label="More actions"><div></div></button></button-view-model></div>
+          </yt-lockup-metadata-view-model>
+        </div>
+      </div>
+    </yt-lockup-view-model>
+  </div>
+</ytd-rich-item-renderer>`;
+}
+
+/** The two real cards from the excerpts. */
+export const REAL_PUBLISHED = Object.freeze({ id: 'yE0hxFTRL4I', badge: '7:32', stampText: '2h ago', stampLabel: '2 hours ago' });
+export const REAL_SCHEDULED = Object.freeze({ id: 'urUODRC4lyA', badge: 'Upcoming', stampText: 'Premieres 10/11/26, 1:00\u202FAM', stampLabel: null, button: 'Notify me', views: null });
+
+/**
+ * The captured page state's shape: 15 cards, Premieres at positions 3, 4, 5,
+ * 12 published. IDs other than the two real ones, titles and the other ages
+ * are synthetic.
+ */
+export function tvMisericordiaShape() {
+  const ages = [['2h ago', '2 hours ago'], ['5h ago', '5 hours ago'], null, null, null,
+    ['1d ago', '1 day ago'], ['2d ago', '2 days ago'], ['3d ago', '3 days ago'], ['4d ago', '4 days ago'],
+    ['5d ago', '5 days ago'], ['6d ago', '6 days ago'], ['1w ago', '1 week ago'], ['1w ago', '1 week ago'],
+    ['2w ago', '2 weeks ago'], ['2w ago', '2 weeks ago']];
+  const premieres = { 2: REAL_SCHEDULED.id, 3: 'PREMIERE004', 4: 'PREMIERE005' };
+  return ages.map((age, i) => {
+    if (!age) {
+      return { id: premieres[i], scheduled: true, html: realLockupCard({ ...REAL_SCHEDULED, id: premieres[i], title: `Premiera ${i + 1}`, stampText: i === 2 ? REAL_SCHEDULED.stampText : `Premieres 10/1${i - 1}/26, 1:00\u202FAM` }) };
+    }
+    const id = i === 0 ? REAL_PUBLISHED.id : `PUBLISHED${String(i + 1).padStart(2, '0')}`;
+    return { id, scheduled: false, html: realLockupCard({ id, title: `Msza Święta ${i + 1} — „Różaniec”`, badge: '7:32', stampText: age[0], stampLabel: age[1] }) };
+  });
+}

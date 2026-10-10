@@ -8,9 +8,11 @@ Gemini classifiers and Ohi's runbook are unchanged.
 **Specification:** `TERNARY_HOUSE_YOUTUBE_QUALIFIER_CHANNEL_DETAILS_AND_ALL_URLS_IMPLEMENTATION_BRIEF_v1.2.md`
 
 **Live-validation status: NOT YET VALIDATED ON LIVE YOUTUBE.** The build
-environment could not reach youtube.com. Every DOM check below ran on
-*simulated* markup. Section 9 lists the live checks that must pass before
-production authorization.
+environment cannot reach youtube.com; automated DOM checks run on simulated
+markup, now including patterns copied from real pages (section 3a). The first
+founder live test found a defect, fixed in section 3a; it must be retested
+live. Section 9 lists the live checks that must pass before production
+authorization.
 
 ---
 
@@ -70,10 +72,10 @@ is read from the **card's own non-title text**, element by element:
 
 | State | Card text that establishes it | Effect |
 | --- | --- | --- |
-| `PUBLISHED_COMPLETED` | `N <unit> ago`, `Premiered N <unit> ago`, `Streamed N <unit> ago` — with no contradicting signal | eligible |
+| `PUBLISHED_COMPLETED` | `N <unit> ago`, `Premiered N <unit> ago`, `Streamed N <unit> ago` — as displayed, or as the `aria-label` of the displayed `role="text"` span when the card shows an abbreviated age (`2h ago` → `2 hours ago`) — with no contradicting signal | eligible |
 | `SCHEDULED_UPCOMING` | `Premieres …`, `Scheduled for …`, `Upcoming`, `Premiere` badge, `N waiting`, a card-scoped **Notify me** button (text or accessible name) | skipped, not counted |
 | `LIVE_NOW` | `LIVE`, `Live now`, `N watching`, `Premiering now` | skipped, not counted |
-| `INDETERMINATE` | none of the above, both published and upcoming/live signals, two different ages, links to two different videos, no readable title, or title attribute and visible title disagreeing | **fail closed** — `Review video status`, nothing copied |
+| `INDETERMINATE` | none of the above (`CARD_STATUS_NOT_FOUND`); an abbreviated age with no readable full form (`CARD_AGE_UNRECOGNIZED`); any age next to an upcoming/live signal, or two different ages (`CARD_STATUS_CONFLICT`); links to two different videos; no readable title; or title attribute and visible title disagreeing | **fail closed** — `Review video status`, nothing copied |
 
 Rules that keep this honest:
 
@@ -90,6 +92,46 @@ operator's FinTaxPro screenshots recorded in the brief (`Notify me`,
 `Premieres …`) and YouTube's long-standing grid wording. Card containers and
 watch-link selectors are the ones v1.1.0 verified live. The new markers have
 **not** been observed on a live 2026 page by this build.
+
+## 3a. Live acceptance finding #1 (2026-10-10) and fix
+
+**Observed by the founder on real YouTube:** `@TvMisericordiaPL/videos`,
+Latest. Card 1 (`yE0hxFTRL4I`) was published, but both Latest exports refused:
+`Grid card 1 (yE0hxFTRL4I): … could not be confirmed (CARD_STATUS_NOT_FOUND)`.
+Copy all video URLs (30 URLs) and the metrics worked.
+
+**Real markup (Chrome DevTools excerpts):** the published card's timestamp is
+`<span class="ytAttributedStringHost ytContentMetadataViewModelMetadataText …" dir="auto" aria-label="2 hours ago" role="text">2h ago</span>`,
+duplicated once; runtime `7:32`. The scheduled Premiere (`urUODRC4lyA`) shows
+`Premieres 10/11/26, 1:00<U+202F>AM` with **no** `aria-label`, an `Upcoming`
+badge and a `Notify me` button.
+
+**Root cause (reproduced from the excerpts before fixing):** live YouTube now
+*displays* an abbreviated age (`2h ago`); the full form exists only in that
+span's `aria-label`. The reader recognised only full forms and read
+`aria-label` only on buttons, so it found no published signal and — correctly —
+refused rather than assume. The simulated fixtures had assumed a displayed
+full form, which is why the automated tests did not catch it. The scheduled
+card was already classified correctly.
+
+**Fix (shared reader only, `content/video-selection.js`):**
+
+- A displayed `role="text"` span's `aria-label` is read as a second reading of
+  that same span. Nothing else's label is read (title heading excluded; empty
+  spans and non-text containers ignored).
+- Ages are compared by value: `2h ago` labelled `2 hours ago`, or the same age
+  duplicated or worded differently, is one age; two different ages conflict.
+- Still fail-closed: an abbreviated age with no readable full form is
+  `CARD_AGE_UNRECOGNIZED` (with the text it saw); it is never assumed
+  published, and next to an upcoming/live signal it is a conflict.
+- Reported text keeps the original characters (the narrow no-break space in
+  `1:00 AM`); matching normalises spaces.
+- The JSON gains `published_text_source` per video (`VISIBLE_TEXT` or
+  `ACCESSIBLE_LABEL`), mirroring `title_source`.
+
+Both exporters, the selector's rules for scheduled/live cards, the general
+export, and everything outside `video-selection.js` and the one JSON field are
+unchanged.
 
 **Order check.** Latest must read newest → oldest. If a card's displayed age is
 clearly younger than one above it (a pinned or reordered card), both Latest
@@ -133,7 +175,8 @@ Shape:
     "required_count": 12, "actual_count": 12, "ordering": "NEWEST_TO_OLDEST",
     "videos": [ { "position": 1, "video_id": "...", "video_url": "https://www.youtube.com/watch?v=...",
                   "title": "...", "title_source": "DOM_TITLE_ATTRIBUTE", "title_truncated_in_ui": null,
-                  "published_text": "2 days ago", "duration_text": "10:15", "thumbnail_text": null,
+                  "published_text": "2 hours ago", "published_text_source": "ACCESSIBLE_LABEL",
+                  "duration_text": "10:15", "thumbnail_text": null,
                   "publication_state": "PUBLISHED_COMPLETED", "publication_state_basis": "CARD_PUBLISHED_AGE_TEXT",
                   "grid_position": 2, "source_ref": "D1" } ],
     "excluded_not_in_sample": [ { "grid_position": 1, "video_id": "...", "publication_state": "SCHEDULED_UPCOMING",
@@ -217,9 +260,9 @@ The manifest adds two content-script files and the version `1.2.0` /
 | `youtube-api.test.mjs` | 31 (unchanged) |
 | `clipboard.test.mjs` | 20 (unchanged) |
 | `url-export.test.mjs` | 44 (loader + fixture shape updated; no assertion changed) |
-| `video-selection.test.mjs` (new) | 54 |
-| `channel-details.test.mjs` (new) | 29 |
-| **Total** | **222** |
+| `video-selection.test.mjs` (new) | 63 (54 + 9 real-pattern regressions) |
+| `channel-details.test.mjs` (new) | 30 (29 + 1 real-pattern cross-check) |
+| **Total** | **232** |
 
 Changes to the pre-existing `url-export.test.mjs`, all required by the new
 fail-closed rule and none changing an assertion: the loader also evaluates
@@ -232,12 +275,17 @@ Without it those entries are, correctly, never treated as published.
 unknown status, title or hidden text read, conflicts ignored, order check off,
 60-card cap, no de-duplication, lexical re-sort, a Latest guard on the general
 export, identity mismatches ignored, `FULL` description, thumbnail text
-fabricated, …). 21 are caught; the survivor is equivalent (a second guard in
-the same function refuses it).
+fabricated, …) plus 7 for the section 3a fix (label not read, label read from
+any element, unrecognised age assumed published or ignored in conflicts, ages
+compared as strings, U+202F lost, `published_text_source` dropped): 28 of 29
+caught; the survivor is equivalent (a second guard in the same function
+refuses it). Six of the new real-pattern tests fail on the pre-fix code.
 
 **Real Chromium, real extension, SIMULATED pages**
-(`node tests/browser/extension-harness.mjs`, optional, needs Playwright): 41
-checks passing — bar order and single mount, both Latest exports agreeing
+(`node tests/browser/extension-harness.mjs`, optional, needs Playwright): 48
+checks passing — the real-pattern page from section 3a (both Latest exports
+copy and agree, Premieres at 3–5 omitted, general export keeps all 15), bar
+order and single mount, both Latest exports agreeing
 position by position with two scheduled Premieres at the top, JSON fields,
 general export on Latest/Popular/Oldest with no scrolling, Popular refusal
 with the clipboard untouched, bounded top-up with scroll restore, SPA switch
@@ -296,6 +344,10 @@ installed v1.1.0 is untouched.
   visibly. If a live card shows *only* a stale upcoming signal and no age,
   it would be skipped; the toast and `excluded_not_in_sample` make that
   auditable.
+- **Abbreviated ages beyond hours are unverified.** Only `2h ago` labelled
+  `2 hours ago` has been seen live. Days, weeks, months and years are expected
+  to follow the same label pattern; if one does not, that card fails closed
+  with `CARD_AGE_UNRECOGNIZED` and its text in the tooltip.
 - **Members-only videos** are treated like any published video; whether they
   should be excluded as "inaccessible" is an open policy question.
 - **Virtualization** of very long grids is unmeasured (section 9.6).
@@ -314,5 +366,7 @@ installed v1.1.0 is untouched.
 
 Do not replace the installed v1.1.0. In a separate Chrome profile: open
 `chrome://extensions`, enable Developer mode, **Load unpacked**, choose this
-folder. It shows as **1.2.0-candidate**. Add an API key in that profile only if
+folder. It shows as **1.2.0-candidate.2** (the build with the section 3a
+fix; `1.2.0-candidate` is the first build). If it still shows
+`1.2.0-candidate`, click the extension's reload icon and hard-refresh YouTube. Add an API key in that profile only if
 testing the metrics.

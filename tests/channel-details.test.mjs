@@ -11,7 +11,7 @@
 import { parseHTML, fragment } from './helpers/mini-dom.mjs';
 import { loadContentScripts, createHarness, assert, equal } from './helpers/load-content.mjs';
 import {
-  STATUS, publishedAt, modernCard, legacyRichCard, modernHeader, legacyHeader, grid, channelPage,
+  STATUS, publishedAt, modernCard, legacyRichCard, modernHeader, legacyHeader, grid, channelPage, tvMisericordiaShape,
 } from './fixtures/youtube-markup.mjs';
 
 const { VS, X, CD } = loadContentScripts();
@@ -437,6 +437,36 @@ test('B7. details and metric collection share the DOM lock (never scroll at once
   release();
   await metric;
   equal((await exporting).status, 'COPIED', 'then completes');
+});
+
+test('B9. real-pattern page (TvMisericordiaPL shape): both Latest exports agree; Premieres omitted', async () => {
+  const shape = tvMisericordiaShape();
+  const page = pagePair({
+    cards: shape.map((c) => c.html),
+    header: { name: 'TV Misericordia', handle: '@TvMisericordiaPL', subscribers: '120K subscribers', videoCount: '4K videos', description: 'Telewizja katolicka.' },
+    route: { base: '@TvMisericordiaPL', tab: 'videos' },
+    documentTitle: 'TV Misericordia - YouTube',
+  });
+  const a = await page.urls.click();
+  const b = await page.details.click();
+  equal(a.status, 'COPIED', `Copy 12 URLs (${X.exportButtonText(a)})`);
+  equal(b.status, 'COPIED', `Copy Channel Details (${CD.detailsButtonText(b)})`);
+  equal(a.excludedCount, 3, 'three Premieres skipped');
+  const lines = page.copies[0].split('\n');
+  const json = JSON.parse(page.copies[1]);
+  const expected = shape.filter((c) => !c.scheduled).map((c) => c.id);
+  equal(lines.length, 12, 'still exactly 12 numbered lines');
+  lines.forEach((line, i) => {
+    equal(line, `${i + 1}. https://www.youtube.com/watch?v=${expected[i]}`, `URL line ${i + 1}`);
+    equal(json.sample.videos[i].video_id, expected[i], `JSON position ${i + 1}`);
+  });
+  equal(json.sample.videos[0].published_text, '2 hours ago', 'published_text from the label');
+  equal(json.sample.videos[0].published_text_source, 'ACCESSIBLE_LABEL', 'and its source');
+  equal(json.sample.videos[0].duration_text, '7:32', 'runtime');
+  equal(json.sample.videos[0].title, 'Msza Święta 1 — „Różaniec”', 'Polish title intact');
+  equal(json.sample.excluded_not_in_sample.map((x) => x.grid_position).join(','), '3,4,5', 'Premieres listed as excluded only');
+  equal(json.sample.excluded_not_in_sample[0].status_text, 'Premieres 10/11/26, 1:00 AM', 'U+202F survives the JSON round-trip');
+  assert(json.capture_limitations.some((n) => /ACCESSIBLE_LABEL/.test(n)), 'the label source is explained');
 });
 
 test('B8. labels', () => {

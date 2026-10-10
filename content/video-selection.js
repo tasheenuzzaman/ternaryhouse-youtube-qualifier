@@ -15,7 +15,12 @@
  *
  *   PUBLISHED_COMPLETED  the card shows a published age ("3 days ago",
  *                        "Premiered 3 days ago", "Streamed 2 years ago") and
- *                        nothing contradicting it.
+ *                        nothing contradicting it. Live YouTube (Oct 2026)
+ *                        displays an abbreviated age ("2h ago") on a
+ *                        role="text" span whose aria-label holds the full
+ *                        form ("2 hours ago"); that label is read as the
+ *                        span's accessible text. An abbreviated age with no
+ *                        readable full form is never assumed published.
  *   SCHEDULED_UPCOMING   "Premieres ...", "Scheduled for ...", "Upcoming",
  *                        "N waiting" or a card-scoped "Notify me" control.
  *   LIVE_NOW             "LIVE", "Live now", "N watching", "Premiering now".
@@ -89,7 +94,10 @@
    * Card status text (pure)
    * ------------------------------------------------------------------ */
 
+  /** For matching: every Unicode space (NBSP, narrow NBSP, ...) becomes one space. */
   const norm = (s) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+  /** For reporting: only markup whitespace is collapsed; NBSP / narrow NBSP are kept. */
+  const tidy = (s) => String(s == null ? '' : s).replace(/[ \t\n\r\f]+/g, ' ').trim();
 
   /** Card text parts are split on YouTube's metadata delimiters. */
   const DELIMITER_RE = /\s*[•·‧|]\s*/;
@@ -109,15 +117,21 @@
     /^live now$/i,
     /^live$/i,
   ];
+  /** Something that reads as a relative age but is not a recognised full form ("2h ago"). */
+  const AGE_LIKE_RE = /\bago$/i;
   /** A runtime badge such as "0:58", "10:15" or "1:02:03". Captured, never judged. */
   const RUNTIME_BADGE_RE = /^\d{1,2}(?::\d{2}){1,2}$/;
 
+  /**
+   * Split segments into parts. `key` is normalised for matching; `text`
+   * keeps the original characters for reporting.
+   */
   function splitParts(segments) {
     const parts = [];
     for (const seg of segments || []) {
-      for (const piece of norm(seg && seg.text).split(DELIMITER_RE)) {
-        const text = norm(piece);
-        if (text) parts.push({ text, zone: seg.zone || 'meta' });
+      for (const piece of tidy(seg && seg.text).split(DELIMITER_RE)) {
+        const text = tidy(piece);
+        if (text) parts.push({ text, key: norm(text), zone: seg.zone || 'meta', source: seg.source || 'text' });
       }
     }
     return parts;
@@ -126,7 +140,8 @@
   /**
    * Decide a card's publication state from its non-title text parts.
    *
-   * input: { segments: [{text, zone}], hasTitle, titleConflict, idConflict }
+   * input: { segments: [{text, zone, source}], hasTitle, titleConflict, idConflict }
+   *        source: 'text' (displayed) or 'label' (the element's aria-label)
    * Runtime never affects the outcome.
    */
   function classifyCard(input) {
@@ -136,33 +151,51 @@
     if (card.titleConflict) return { state: STATE.INDETERMINATE, basis: 'CARD_TITLE_DISAGREES', evidence: null };
 
     const published = [];
+    const ageLike = [];
     const scheduled = [];
     const live = [];
     // Signals are ranked by pattern order so the evidence reported is the
     // most specific one ("Premieres 10/11/26, 8:00 PM" over a bare badge).
-    const rank = (res, text) => res.findIndex((re) => re.test(text));
-    for (const { text } of splitParts(card.segments)) {
-      const pub = PUBLISHED_RE.exec(text);
-      if (pub) published.push({ text, kind: (pub[1] || '').toLowerCase() });
-      else if (rank(LIVE_RES, text) >= 0) live.push(text);
-      else if (rank(SCHEDULED_RES, text) >= 0) scheduled.push(text);
+    const rank = (res, part) => res.findIndex((re) => re.test(part.key));
+    for (const part of splitParts(card.segments)) {
+      const pub = PUBLISHED_RE.exec(part.key);
+      if (pub) published.push({ ...part, kind: (pub[1] || '').toLowerCase(), age: ageSeconds(part.key) });
+      else if (rank(LIVE_RES, part) >= 0) live.push(part);
+      else if (rank(SCHEDULED_RES, part) >= 0) scheduled.push(part);
+      else if (AGE_LIKE_RE.test(part.key)) ageLike.push(part);
     }
     live.sort((a, b) => rank(LIVE_RES, a) - rank(LIVE_RES, b));
     scheduled.sort((a, b) => rank(SCHEDULED_RES, a) - rank(SCHEDULED_RES, b));
 
-    const distinctPublished = new Set(published.map((p) => p.text.toLowerCase()));
-    if (published.length && (scheduled.length || live.length || distinctPublished.size > 1)) {
-      const evidence = [...new Set([...published.map((p) => p.text), ...live, ...scheduled])].join(' | ');
+    // The same age shown twice, or as "2h ago" with the label "2 hours ago",
+    // is one age. Two different ages, or any age next to an upcoming/live
+    // signal, is a contradiction.
+    const distinctAges = new Set(published.map((p) => p.age));
+    const anyAge = published.length || ageLike.length;
+    if ((anyAge && (scheduled.length || live.length)) || distinctAges.size > 1) {
+      const evidence = [...new Set([...published, ...ageLike, ...live, ...scheduled].map((p) => p.text))].join(' | ');
       return { state: STATE.INDETERMINATE, basis: 'CARD_STATUS_CONFLICT', evidence };
     }
-    if (live.length) return { state: STATE.LIVE, basis: 'CARD_LIVE_INDICATOR', evidence: live[0] };
-    if (scheduled.length) return { state: STATE.SCHEDULED, basis: 'CARD_UPCOMING_INDICATOR', evidence: scheduled[0] };
+    if (live.length) return { state: STATE.LIVE, basis: 'CARD_LIVE_INDICATOR', evidence: live[0].text };
+    if (scheduled.length) return { state: STATE.SCHEDULED, basis: 'CARD_UPCOMING_INDICATOR', evidence: scheduled[0].text };
     if (published.length) {
-      const { text, kind } = published[0];
+      // Report what the card displays when it is a full form; otherwise the
+      // span's accessible label, and say so.
+      const best = published.find((p) => p.source === 'text') || published[0];
+      const kind = published.map((p) => p.kind).find(Boolean) || '';
       const basis = kind === 'premiered' ? 'CARD_COMPLETED_PREMIERE_TEXT'
         : kind === 'streamed' ? 'CARD_COMPLETED_STREAM_TEXT'
           : 'CARD_PUBLISHED_AGE_TEXT';
-      return { state: STATE.PUBLISHED, basis, evidence: text, publishedText: text };
+      return {
+        state: STATE.PUBLISHED,
+        basis,
+        evidence: best.text,
+        publishedText: best.text,
+        publishedTextSource: best.source === 'label' ? 'ACCESSIBLE_LABEL' : 'VISIBLE_TEXT',
+      };
+    }
+    if (ageLike.length) {
+      return { state: STATE.INDETERMINATE, basis: 'CARD_AGE_UNRECOGNIZED', evidence: ageLike[0].text };
     }
     return { state: STATE.INDETERMINATE, basis: 'CARD_STATUS_NOT_FOUND', evidence: null };
   }
@@ -170,8 +203,8 @@
   /** First runtime badge in the thumbnail, else anywhere outside the title. */
   function runtimeBadgeText(segments) {
     const parts = splitParts(segments);
-    const hit = parts.find((p) => p.zone === 'thumb' && RUNTIME_BADGE_RE.test(p.text))
-      || parts.find((p) => RUNTIME_BADGE_RE.test(p.text));
+    const hit = parts.find((p) => p.zone === 'thumb' && p.source === 'text' && RUNTIME_BADGE_RE.test(p.key))
+      || parts.find((p) => p.source === 'text' && RUNTIME_BADGE_RE.test(p.key));
     return hit ? hit.text : null;
   }
 
@@ -295,7 +328,7 @@
     for (const child of node.childNodes || []) {
       if (child.nodeType === 3) text += ` ${child.nodeValue}`;
     }
-    return norm(text);
+    return tidy(text);
   }
 
   /** All rendered text of a node, skipping `hidden` subtrees. */
@@ -312,23 +345,30 @@
 
   /**
    * The card's text, element by element, outside the title. Each segment is
-   * tagged with its zone ('thumb' overlay or 'meta'); a card-scoped button's
-   * accessible name is included as a 'control' segment.
+   * tagged with its zone ('thumb' overlay or 'meta') and source. A displayed
+   * text span (role="text") that carries an aria-label also contributes that
+   * label, as a second reading of the same span; a card-scoped button's
+   * accessible name is included as a 'control' segment. No other attribute
+   * is read.
    */
   function cardSegments(item) {
     const out = [];
     const rootText = ownText(item);
-    if (rootText) out.push({ text: rootText, zone: 'meta' });
+    if (rootText) out.push({ text: rootText, zone: 'meta', source: 'text' });
     (function walk(node, zone) {
       for (const child of node.childNodes || []) {
         if (child.nodeType !== 1) continue;
         if (isHidden(child) || SKIP_TAGS.has(tagOf(child)) || isTitleNode(child)) continue;
         const childZone = zone === 'thumb' || isThumbNode(child) ? 'thumb' : zone;
         const text = ownText(child);
-        if (text) out.push({ text, zone: childZone });
+        if (text) out.push({ text, zone: childZone, source: 'text' });
+        if (text && attr(child, 'role') === 'text') {
+          const label = tidy(attr(child, 'aria-label'));
+          if (label) out.push({ text: label, zone: childZone, source: 'label' });
+        }
         if (tagOf(child) === 'BUTTON' || attr(child, 'role') === 'button') {
-          const label = norm(attr(child, 'aria-label'));
-          if (label) out.push({ text: label, zone: 'control' });
+          const label = tidy(attr(child, 'aria-label'));
+          if (label) out.push({ text: label, zone: 'control', source: 'label' });
         }
         walk(child, childZone);
       }
@@ -409,6 +449,7 @@
       titleSource: title.hasTitle ? title.titleSource : null,
       titleTruncatedInUi: title.hasTitle ? title.titleTruncatedInUi : null,
       publishedText: status.publishedText || null,
+      publishedTextSource: status.publishedTextSource || null,
       durationText: runtimeBadgeText(segments),
       state: status.state,
       stateBasis: status.basis,

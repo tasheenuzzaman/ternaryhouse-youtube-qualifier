@@ -276,7 +276,7 @@
       m.video_count_text ? null : 'video_count_text',
     ].filter(Boolean);
     if (missingCounts.length) notes.push(`channel_more_info: ${missingCounts.join(' and ')} not found in the channel header.`);
-    notes.push('published_text is YouTube\'s relative age as displayed at captured_at, not an exact date.');
+    notes.push('published_text is YouTube\'s relative age at captured_at, not an exact date. Where the card displays an abbreviated age (e.g. "2h ago"), published_text is that element\'s accessible label (published_text_source: ACCESSIBLE_LABEL).');
     notes.push('thumbnail_text is null: thumbnail lettering is part of the image, not page text, and is not read (no OCR).');
     if (videos.some((v) => v.titleTruncatedInUi === null)) {
       notes.push('title_truncated_in_ui is null where clipping cannot be determined from page text.');
@@ -334,6 +334,7 @@
           title_source: v.titleSource,
           title_truncated_in_ui: v.titleTruncatedInUi ?? null,
           published_text: v.publishedText || null,
+          published_text_source: v.publishedTextSource || null,
           duration_text: v.durationText || null,
           thumbnail_text: null,
           publication_state: v.state,

@@ -60,6 +60,21 @@ Everything in `lib/`, `background/`, `options/`, `content/render.js`,
 `TARGET_CANDIDATES` (30), `checkLatestOrdering()`, `readSortChips()`, the
 `ANALYZE` request, permissions, key handling and storage isolation.
 
+### Fixed after the first live acceptance test (2026-10-10)
+
+- **Published cards showing an abbreviated age were refused** (`Review video
+  status`, `CARD_STATUS_NOT_FOUND`) on `@TvMisericordiaPL`. Live YouTube
+  displays `2h ago` and keeps `2 hours ago` only in the span's `aria-label`.
+  The shared reader now reads the `aria-label` of a displayed `role="text"`
+  span, compares ages by value (duplicates and short/long pairs agree), and
+  keeps failing closed on an abbreviated age with no full form
+  (`CARD_AGE_UNRECOGNIZED`). Reported status text keeps the original
+  characters (e.g. U+202F). New JSON field `published_text_source`.
+- Tests 222 -> **232** (9 real-pattern regressions in the selection suite, 1
+  cross-exporter check in the channel-details suite); harness 41 -> 48 checks;
+  example JSON regenerated from the real card shape. Build label
+  `version_name: 1.2.0-candidate.2` so the corrected build is identifiable.
+
 ### Tests
 
 139 -> **222**: new `video-selection.test.mjs` (54) and

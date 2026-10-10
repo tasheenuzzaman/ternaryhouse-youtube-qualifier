@@ -27,6 +27,7 @@ import { parseHTML } from '../helpers/mini-dom.mjs';
 import { loadContentScripts } from '../helpers/load-content.mjs';
 import {
   STATUS, publishedAt, modernCard, legacyRichCard, modernHeader, legacyHeader, channelPage, grid,
+  realLockupCard, REAL_PUBLISHED, REAL_SCHEDULED, tvMisericordiaShape,
 } from '../fixtures/youtube-markup.mjs';
 
 const require = createRequire(import.meta.url);
@@ -74,6 +75,13 @@ const CHANNELS = {
     header: () => modernHeader({ name: 'Slow Load', handle: '@SlowLoad', subscribers: '1K subscribers', videoCount: '38 videos', description: 'Loads slowly.' }),
     cards: publishedList(3000, 38),
     initial: 8,
+  },
+  // Real Oct-2026 card patterns (founder's DevTools excerpts); shell reconstructed.
+  '@TvMisericordiaPL': {
+    name: 'TV Misericordia',
+    header: () => modernHeader({ name: 'TV Misericordia', handle: '@TvMisericordiaPL', subscribers: '120K subscribers', videoCount: '4K videos', description: 'Telewizja katolicka.' }),
+    cards: tvMisericordiaShape().map(({ id, html }) => ({ id, html })),
+    initial: 15,
   },
   '@ThousandCards': {
     name: 'Thousand Cards',
@@ -257,7 +265,7 @@ try {
       && json.channel_more_info.video_count_text === '312 videos');
     check('details: Unicode/quotes title intact', json.sample.videos[0].title === 'Video 1000 — “quotes” & ভিডিও', json.sample.videos[0].title);
     check('details: scheduled listed only as excluded', json.sample.excluded_not_in_sample.map((x) => x.video_id).join(',') === `${vid(911)},${vid(912)}`);
-    check('details: tool version is the candidate build', json.source.tool_version === '1.2.0-candidate', json.source.tool_version);
+    check('details: tool version is the candidate build', json.source.tool_version === '1.2.0-candidate.2', json.source.tool_version);
     check('details: captured_at has a timezone offset', /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d$/.test(json.captured_at), json.captured_at);
   }
 
@@ -312,6 +320,28 @@ try {
   }
   check('slow page: 12 lines', (await clip()).split('\n').length === 12);
 
+  console.log('\nREAL CARD PATTERNS (TvMisericordiaPL shape: Premieres at 3, 4, 5)');
+  await page.goto('https://www.youtube.com/@TvMisericordiaPL/videos');
+  await bar().first().waitFor({ state: 'attached', timeout: 15000 });
+  const realShape = tvMisericordiaShape();
+  const realExpected = realShape.filter((c) => !c.scheduled).map((c, i) => `${i + 1}. ${wurl(c.id)}`).join('\n');
+  const r12 = await clickExport(0, DONE);
+  const realBlock = await clip();
+  check('real patterns: Copy 12 URLs copies (was "Review video status")', r12 === 'Copied 12 URLs', r12);
+  check('real patterns: positions 1, 2, 6-15; Premieres omitted', realBlock === realExpected, realBlock.split('\n')[0]);
+  const rd = await clickExport(1, DONE);
+  const realJson = JSON.parse(await clip());
+  check('real patterns: Copy Channel Details copies', rd === 'Copied channel details', rd);
+  check('real patterns: both exports agree position by position',
+    realJson.sample.videos.map((v, i) => `${i + 1}. ${v.video_url}`).join('\n') === realBlock);
+  check('real patterns: age from the accessible label, source recorded',
+    realJson.sample.videos[0].published_text === '2 hours ago' && realJson.sample.videos[0].published_text_source === 'ACCESSIBLE_LABEL');
+  check('real patterns: Premiere evidence keeps U+202F', realJson.sample.excluded_not_in_sample[0].status_text === 'Premieres 10/11/26, 1:00\u202FAM');
+  const ra = await clickExport(2, DONE);
+  const realAll = (await clip()).split('\n');
+  check('real patterns: Copy all video URLs keeps all 15, Premieres included in grid order',
+    ra === 'Copied 15 URLs' && realAll.slice(3).join('\n') === realShape.map((c, i) => `${i + 1}. ${wurl(c.id)}`).join('\n'), ra);
+
   console.log('\nSPA NAVIGATION');
   await page.goto('https://www.youtube.com/@FixtureTax/videos');
   await bar().first().waitFor({ state: 'attached', timeout: 15000 });
@@ -353,6 +383,9 @@ try {
     modernCard({ id: vid(5003), title: 'x', ...STATUS.live }),
     legacyRichCard({ id: vid(5004), title: 'Legacy "q"', ...STATUS.scheduled }),
     legacyRichCard({ id: vid(5005), title: 'Legacy pub', ...publishedAt(50) }),
+    realLockupCard({ ...REAL_PUBLISHED, title: 'Real published' }),
+    realLockupCard({ ...REAL_SCHEDULED, title: 'Real premiere' }),
+    realLockupCard({ ...REAL_PUBLISHED, id: 'NOLABEL0001', title: 'No label', stampLabel: null }),
   ].join('');
   const gridHtml = grid(sampleCards);
   const nodeSide = JSON.stringify(VS.readVideoCards(parseHTML(gridHtml).children[0]));

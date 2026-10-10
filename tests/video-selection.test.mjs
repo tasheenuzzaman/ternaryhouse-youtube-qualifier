@@ -14,6 +14,7 @@ import { parseHTML, fragment } from './helpers/mini-dom.mjs';
 import { loadContentScripts, createHarness, assert, equal, sourceOf } from './helpers/load-content.mjs';
 import {
   STATUS, publishedAt, modernCard, legacyRichCard, legacyGridCard, shortsCard, unrenderedCard, playlistCard, grid,
+  realLockupCard, realStampSpan, REAL_PUBLISHED, REAL_SCHEDULED, tvMisericordiaShape,
 } from './fixtures/youtube-markup.mjs';
 
 const { VS, X } = loadContentScripts();
@@ -661,6 +662,121 @@ test('U10. the Sort line: chip text, 3-chip position, otherwise Unknown — neve
 /* =================================================================== *
  * Isolation
  * =================================================================== */
+
+/* =================================================================== *
+ * Real YouTube patterns (founder's Chrome outerHTML excerpts,
+ * @TvMisericordiaPL, 2026-10-10). See tests/fixtures/youtube-markup.mjs for
+ * exactly which parts are verbatim and which are reconstructed.
+ * =================================================================== */
+
+group('REAL YOUTUBE PATTERNS (live acceptance finding #1)');
+
+const readOne = (html) => VS.readVideoCards({ querySelectorAll: () => [fragment(html)] })[0];
+const NNBSP = ' ';
+
+test('RY1. published card: "2h ago" displayed, aria-label "2 hours ago", duplicated stamp -> PUBLISHED', () => {
+  const e = readOne(realLockupCard({ ...REAL_PUBLISHED, title: 'Real published' }));
+  equal(e.videoId, 'yE0hxFTRL4I', 'id');
+  equal(e.state, P.PUBLISHED, 'state (was CARD_STATUS_NOT_FOUND in candidate 49f0208)');
+  equal(e.stateBasis, 'CARD_PUBLISHED_AGE_TEXT', 'basis');
+  equal(e.publishedText, '2 hours ago', 'the full form, from the accessible label');
+  equal(e.publishedTextSource, 'ACCESSIBLE_LABEL', 'and its source is recorded');
+  equal(e.durationText, '7:32', 'runtime');
+  equal(VS.cardSegments(fragment(realLockupCard({ ...REAL_PUBLISHED, title: 't' }))).filter((x) => x.text === '2 hours ago').length, 2,
+    'the duplicated timestamp is really read twice — and is not a conflict');
+});
+
+test('RY2. scheduled card: no aria-label, narrow no-break space, "Upcoming", "Notify me" -> SCHEDULED', () => {
+  const e = readOne(realLockupCard({ ...REAL_SCHEDULED, title: 'Real premiere' }));
+  equal(e.videoId, 'urUODRC4lyA', 'id');
+  equal(e.state, P.SCHEDULED, 'state');
+  equal(e.stateEvidence, `Premieres 10/11/26, 1:00${NNBSP}AM`, 'evidence keeps the U+202F exactly');
+  equal(e.publishedText, null, 'no published text');
+});
+
+test('RY3. each real upcoming signal on its own is enough; none is needed in a particular form', () => {
+  const only = (opts) => readOne(realLockupCard({ id: 'urUODRC4lyA', title: 't', badge: '', stampText: '', ...opts, duplicateStamp: false }));
+  equal(only({ stampText: `Premieres 10/11/26, 1:00${NNBSP}AM` }).state, P.SCHEDULED, '"Premieres …" with U+202F, no badge, no button');
+  equal(only({ badge: 'Upcoming', stampText: '1.2K views' }).state, P.SCHEDULED, '"Upcoming" badge (title case) alone');
+  equal(only({ button: 'Notify me', stampText: '1.2K views' }).state, P.SCHEDULED, '"Notify me" control alone');
+  equal(only({ stampText: `Premieres 10/11/26, 1:00${NNBSP}AM`, stampLabel: `Premieres 10/11/26, 1:00${NNBSP}AM` }).state, P.SCHEDULED,
+    'a label equal to the text changes nothing');
+});
+
+test('RY4. still fail-closed: abbreviated age with no label, contradictions, nothing at all', () => {
+  const noLabel = readOne(realLockupCard({ ...REAL_PUBLISHED, title: 't', stampLabel: null }));
+  equal(noLabel.state, P.INDETERMINATE, '"2h ago" with no full form is NOT assumed published');
+  equal(noLabel.stateBasis, 'CARD_AGE_UNRECOGNIZED', 'specific diagnostic');
+  equal(noLabel.stateEvidence, '2h ago', 'naming the text that was seen');
+
+  const ageAndNotify = readOne(realLockupCard({ ...REAL_PUBLISHED, title: 't', stampLabel: null, button: 'Notify me' }));
+  equal(ageAndNotify.state, P.INDETERMINATE, 'an unrecognised age next to "Notify me" is a conflict, not a silent skip');
+  equal(ageAndNotify.stateBasis, 'CARD_STATUS_CONFLICT', 'basis');
+
+  const labelAndUpcoming = readOne(realLockupCard({ ...REAL_PUBLISHED, title: 't', badge: 'Upcoming' }));
+  equal(labelAndUpcoming.stateBasis, 'CARD_STATUS_CONFLICT', 'a labelled age next to "Upcoming" is a conflict');
+
+  const twoAges = readOne(realLockupCard({ ...REAL_PUBLISHED, title: 't', stampText: '3 days ago', stampLabel: '2 hours ago' }));
+  equal(twoAges.stateBasis, 'CARD_STATUS_CONFLICT', 'displayed age and label disagreeing is a conflict');
+
+  const nothing = readOne(realLockupCard({ id: 'NOSTATUS001', title: 't', badge: '7:32', stampText: '1.2K views', duplicateStamp: false }));
+  equal(nothing.state, P.INDETERMINATE, 'no age and no "Upcoming" is NOT assumed published');
+  equal(nothing.stateBasis, 'CARD_STATUS_NOT_FOUND', 'basis');
+});
+
+test('RY4b. one age written two ways (text vs label, wording, duplicate) is one age, not a conflict', () => {
+  const sameAge = readOne(realLockupCard({ ...REAL_PUBLISHED, title: 't', stampText: '1 hour ago', stampLabel: 'an hour ago' }));
+  equal(sameAge.state, P.PUBLISHED, '"1 hour ago" labelled "an hour ago"');
+  equal(sameAge.publishedText, '1 hour ago', 'displayed full form preferred');
+  equal(sameAge.publishedTextSource, 'VISIBLE_TEXT', 'source');
+  const premiered = readOne(realLockupCard({ ...REAL_PUBLISHED, title: 't', stampText: '2h ago', stampLabel: 'Premiered 2 hours ago' })
+    .replace(/<\/yt-content-metadata-view-model>/, `${realStampSpan('2h ago', '2 hours ago')}</yt-content-metadata-view-model>`));
+  equal(premiered.state, P.PUBLISHED, '"Premiered 2 hours ago" and "2 hours ago" agree');
+  equal(premiered.stateBasis, 'CARD_COMPLETED_PREMIERE_TEXT', 'the more specific basis is kept');
+});
+
+test('RY5. labels are read only from displayed text spans outside the title', () => {
+  const titleLabel = realLockupCard({ ...REAL_PUBLISHED, title: 't' })
+    .replace('<span class="ytAttributedStringHost" role="text">t</span>', '<span class="ytAttributedStringHost" role="text" aria-label="Premieres tomorrow">t</span>');
+  equal(readOne(titleLabel).state, P.PUBLISHED, 'a label inside the title heading is ignored');
+  const roleless = realLockupCard({ ...REAL_PUBLISHED, title: 't' })
+    .replace('<div class="ytLockupViewModelMetadata">', '<div class="ytLockupViewModelMetadata" aria-label="LIVE">');
+  equal(readOne(roleless).state, P.PUBLISHED, 'a label on a container that is not a text span is ignored');
+  const emptySpan = realLockupCard({ ...REAL_PUBLISHED, title: 't', stampLabel: null })
+    .replace('</yt-content-metadata-view-model>', `${realStampSpan('', '2 hours ago')}</yt-content-metadata-view-model>`);
+  equal(readOne(emptySpan).state, P.INDETERMINATE, 'a label on an EMPTY span is not used to rescue an abbreviated age');
+});
+
+test('RY6. TvMisericordiaPL page shape: Premieres at 3, 4, 5 skipped; 12 published selected', () => {
+  const shape = tvMisericordiaShape();
+  const sel = VS.selectEligibleVideos(VS.readVideoCards(gridOf(shape.map((c) => c.html))));
+  const expected = shape.filter((c) => !c.scheduled).map((c) => c.id);
+  equal(sel.ids.join(','), expected.join(','), 'grid positions 1, 2, 6-15');
+  equal(sel.ids[0], 'yE0hxFTRL4I', 'the real published card is first');
+  equal(sel.excluded.map((x) => x.gridPosition).join(','), '3,4,5', 'the three Premieres');
+  equal(sel.excluded[0].videoId, 'urUODRC4lyA', 'the real Premiere is skipped');
+  equal(sel.blocked, null, 'nothing undecided');
+  equal(sel.orderAnomaly, null, 'label ages read newest to oldest');
+  assert(sel.videos.every((v) => v.publishedTextSource === 'ACCESSIBLE_LABEL'), 'every age came from its label');
+});
+
+test('RY7. order checking still works on label-derived ages (pinned card)', () => {
+  const shape = tvMisericordiaShape().filter((c) => !c.scheduled);
+  const pinned = realLockupCard({ id: 'PINNEDOLD01', title: 'Pinned', badge: '7:32', stampText: '3y ago', stampLabel: '3 years ago' });
+  const sel = VS.selectEligibleVideos(VS.readVideoCards(gridOf([pinned, ...shape.map((c) => c.html)])));
+  assert(sel.orderAnomaly, 'anomaly detected');
+  equal(sel.orderAnomaly.gridPosition, 2, 'at the first younger card');
+});
+
+test('RY8. Copy all video URLs on the same page: all 15, Premieres included, grid order', async () => {
+  const shape = tvMisericordiaShape();
+  const env = allEnv({ cards: shape.map((c) => c.html) });
+  const result = await env.exporter.click();
+  equal(result.status, 'COPIED', 'status');
+  const parsed = parseAllUrls(env.copies[0]);
+  equal(parsed.total, 15, 'every loaded card');
+  equal(parsed.urls.join(','), shape.map((c) => url(c.id)).join(','), 'grid order, Premieres at 3, 4, 5');
+});
 
 group('ISOLATION');
 

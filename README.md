@@ -389,7 +389,9 @@ form:
 - **Scheduled Premieres and live/upcoming broadcasts are skipped** and do not
   count toward 12; older published videos fill the 12. Completed Premieres are
   included. Each card's status is read from its own text (never its title):
-  `3 days ago` / `Premiered …` / `Streamed …` = published; `Premieres …`,
+  `3 days ago` / `Premiered …` / `Streamed …` = published (when YouTube shows
+  an abbreviated `2h ago`, the full form in that text's accessible label is
+  used, and the JSON records `published_text_source`); `Premieres …`,
   `Scheduled for …`, `Upcoming`, `N waiting`, **Notify me** = upcoming;
   `LIVE`, `N watching` = live. A short note *Skipped N upcoming/live videos*
   appears when any were skipped.
@@ -705,7 +707,7 @@ which runs all six suites with Node. Or with Deno:
 for t in calculations youtube-api clipboard url-export video-selection channel-details; do deno run --allow-read tests/$t.test.mjs; done
 ```
 
-222 tests in six suites (1.2.0 candidate). The calculation and API suites (75) cover the trimmed average (including duplicate and all-equal extremes),
+232 tests in six suites (1.2.0 candidate). The calculation and API suites (75) cover the trimmed average (including duplicate and all-equal extremes),
 small-sample and insufficient-sample states, hidden statistics, the per-video ER
 formula, both aggregations and the fact that they differ, calendar-month cutoff
 boundaries, duration parsing, long-form eligibility, completed-Premiere
@@ -713,10 +715,10 @@ handling, the trimmed creator engagement rate (including duplicate extremes, una
 observations, and every sample band from 0 to 12), and storage-isolation policy.
 The clipboard suite (20) covers every compact copy state; the URL-export suite
 (44) covers the 12-URL format, ordering, Shorts and sort rules, lazy loading,
-the Ready fallback's safety and lock release. The selection suite (54) covers
+the Ready fallback's safety and lock release. The selection suite (63) covers
 publication-state reading on simulated modern and legacy card markup,
 scheduled/live exclusion, fail-closed cases, the shared 12-video selection and
-the general all-URLs export; the channel-details suite (29) covers the header
+the general all-URLs export; the channel-details suite (30) covers the header
 reader, identity checks, the JSON block and agreement between the two Latest
 exports. All run against the real shipped content scripts and await every
 test.
