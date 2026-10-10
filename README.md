@@ -6,10 +6,13 @@ recent **Avg Views** and recent **Engagement** evidence.
 
 Open a channel's Videos tab, click one control, copy, move on.
 
-**Version 1.1.0 — STABLE / VALIDATED INTERNAL RELEASE.** Adds the
-**Copy 12 URLs** action (section 14a); Avg Views and Engagement are unchanged.
-See [RELEASE_NOTES_v1.1.0.md](RELEASE_NOTES_v1.1.0.md). 1.0.0, 1.0.1 and 1.0.2
-remain archived with their own release notes. Full history in
+**Version 1.2.0 — CANDIDATE, under acceptance testing; NOT authorized for
+production.** Adds **Copy Channel Details** (section 14b) and **Copy all video
+URLs** (section 14c), and stops **Copy 12 URLs** from exporting scheduled
+Premieres (section 14a). Avg Views and Engagement are unchanged. Not yet
+validated on live YouTube — see [RELEASE_NOTES_v1.2.0.md](RELEASE_NOTES_v1.2.0.md).
+**v1.1.0 remains the stable release** ([RELEASE_NOTES_v1.1.0.md](RELEASE_NOTES_v1.1.0.md));
+1.0.0, 1.0.1 and 1.0.2 remain archived. Full history in
 [CHANGELOG.md](CHANGELOG.md).
 
 ---
@@ -25,8 +28,14 @@ remain archived with their own release notes. Full history in
     trimmed mean.
 - Shows a full audit view so any number can be checked by hand.
 - Makes each displayed value one click to copy.
-- **Copy 12 URLs** puts the watch URLs of the 12 newest normal Videos-tab
-  uploads on the clipboard. It reads the page only — no API call, no key.
+- **Copy 12 URLs** puts the watch URLs of the 12 newest *published* normal
+  Videos-tab uploads on the clipboard. It reads the page only — no API call,
+  no key.
+- **Copy Channel Details** copies one JSON evidence block — the channel as
+  shown on the page plus the same 12 videos with their titles, ages and
+  runtimes — for the Creator Evidence Maker.
+- **Copy all video URLs** copies every video URL currently loaded in the
+  Videos grid, in on-page order, on any sort.
 
 ## 2. What it deliberately does NOT do
 
@@ -337,8 +346,10 @@ Your saved API key survives a reload.
    chips. Click the other control to switch panels, click the same one again
    (or **✕**) to close.
 5. **↻** recalculates from scratch, bypassing the cache.
-6. **Copy 12 URLs** copies the 12 newest video URLs (section 14a). It is
-   independent of the two metrics and works without an API key.
+6. **Copy 12 URLs** copies the 12 newest published video URLs (section 14a),
+   **Copy Channel Details** the JSON evidence block (14b), and **Copy all
+   video URLs** every loaded video URL (14c). They are independent of the two
+   metrics and work without an API key.
 
 Navigating to the next creator resets everything automatically — no reload, and
 no chance of seeing the previous creator's numbers.
@@ -361,7 +372,8 @@ refused copy shows **Copy failed**. No notifications, no dialogs.
 ## 14a. Copy 12 URLs
 
 On a channel's **Videos → Latest** tab, **Copy 12 URLs** copies the watch URLs
-of the 12 newest normal uploads, newest first, in exactly this form:
+of the 12 newest **published** normal uploads, newest first, in exactly this
+form:
 
 ```
 1. https://www.youtube.com/watch?v=VIDEO_ID_1
@@ -374,6 +386,17 @@ of the 12 newest normal uploads, newest first, in exactly this form:
   sample rule: a creator with 5 recent uploads still gets their newest 12.
 - Shorts are excluded by surface (`/shorts/` items). Runtime is never used, so
   a 58-second `/watch?v=` upload on the Videos tab is included.
+- **Scheduled Premieres and live/upcoming broadcasts are skipped** and do not
+  count toward 12; older published videos fill the 12. Completed Premieres are
+  included. Each card's status is read from its own text (never its title):
+  `3 days ago` / `Premiered …` / `Streamed …` = published; `Premieres …`,
+  `Scheduled for …`, `Upcoming`, `N waiting`, **Notify me** = upcoming;
+  `LIVE`, `N watching` = live. A short note *Skipped N upcoming/live videos*
+  appears when any were skipped.
+- **Unclear status fails closed.** A card that shows no status, or conflicting
+  ones, is never assumed published: the button shows **Review video status**
+  and nothing is copied. Copy Channel Details uses exactly the same selection,
+  so the two always agree on videos 1–12.
 - Links are canonicalised — timestamps, playlists and tracking parameters are
   dropped.
 - No API request, no API key, nothing sent anywhere. It reads the page and
@@ -383,14 +406,74 @@ of the 12 newest normal uploads, newest first, in exactly this form:
 | --- | --- |
 | **Copied 12 URLs** | Done. Paste. |
 | **Switch to Latest** | The grid is on Popular or Oldest. Nothing was copied and the sort was not changed. |
-| **Found N of 12** | Only N normal videos could be read. Nothing was copied. This can mean the channel has fewer uploads *or* the page had not loaded more — scroll once and retry. |
+| **Found N of 12** | Only N published videos could be read. Nothing was copied. This can mean the channel has fewer uploads *or* the page had not loaded more — scroll once and retry. |
+| **Review video status** | A card above the 12th has no clear published/upcoming/live status. Hover the button for its grid position and video ID, check the card, retry. Nothing was copied. |
+| **Review video order** | The cards' ages are not newest-to-oldest (a pinned or reordered card). Nothing was copied. |
 | **Ready — click to copy** | The URLs were collected, but the browser refused the copy because the click was too long ago (Chrome allows ~5 s). Click once more to copy. The prepared list is discarded after 60 s, on Refresh, on changing sort, or on leaving the channel. |
 | **Copy failed** | The browser refused the clipboard. Click again. |
 
-**Known limitation:** a scheduled Premiere shown on the Videos tab (badge
-*Upcoming*) is exported like a published video, because YouTube marks it no
-differently in the page structure. If the first URL is a scheduled item, drop
-it and take one more from the grid.
+**Language:** status is read from YouTube's **English** UI text. In any other
+YouTube language every card is "unclear" and the button shows **Review video
+status** — switch YouTube to English.
+
+## 14b. Copy Channel Details
+
+On **Videos → Latest**, copies one strict-JSON block for the Creator Evidence
+Maker: `capture_type: TERNARY_HOUSE_BROWSER_EVIDENCE_INPUT`, the capture time,
+the channel name, handle and clean channel URL as shown on the page, the header
+description preview, subscriber/video counts when shown, and **the same 12
+videos as Copy 12 URLs, in the same order**, each with its canonical URL,
+title (and whether it came from the card's title attribute or visible text),
+displayed age, runtime text and the evidence for its published status.
+Skipped scheduled/live cards are listed separately under
+`excluded_not_in_sample`.
+
+- It is **source evidence, not a Creator Evidence Packet** — never labelled
+  READY. The Evidence Maker still validates it (and needs a spec update before
+  Ohi relies on it; see the release notes).
+- Nothing is invented. The About panel is not opened, so country, joined date
+  and lifetime views are `null`; the description is the header preview
+  (`PARTIAL`). Thumbnail lettering is not read (no OCR). Every missing field is
+  listed in `capture_limitations`.
+- If the header does not match the page (for example right after switching
+  creators), it refuses with **Channel identity unclear**.
+
+Other labels as Copy 12 URLs, except **Found N of 12 — load/retry** and
+**Copied channel details**.
+
+## 14c. Copy all video URLs
+
+Works on the Videos tab on **any sort** (Latest, Popular or Oldest). Scroll as
+far as you want first; the button never scrolls or loads anything. It copies
+every unique video URL in the cards currently loaded in the grid, in on-page
+order:
+
+```
+Total URLs: 347
+Sort: Oldest
+
+1. https://www.youtube.com/watch?v=VIDEO_ID_1
+...
+347. https://www.youtube.com/watch?v=VIDEO_ID_347
+```
+
+- `Total URLs` always equals the number of numbered lines. `Sort` is the active
+  chip, or `Unknown`. For a tool that wants URLs only, delete the first three
+  lines.
+- **It is what is loaded, not the whole channel.** A channel showing
+  "1.1K videos" gives only the cards you scrolled into the page.
+- Unlike Copy 12 URLs, it **includes** scheduled Premiere cards that have a
+  watch link — it lists what the page shows, not what is published.
+- Shorts, playlists, duplicates and non-video links are left out; a video
+  appears once, at its first position.
+
+| Button shows | Meaning |
+| --- | --- |
+| **Copied N URLs** | Done. Hover for the number of cards read. |
+| **No loaded video URLs** | No video cards in the grid. Clipboard untouched. |
+| **N cards not ready — retry** | Some cards are still rendering. Wait a moment. Clipboard untouched. |
+| **Busy — retry** | Another export or the metrics are loading the page. |
+| **Copy failed** | The browser refused the clipboard. Click again. |
 
 ## 15. Troubleshooting
 
@@ -409,6 +492,8 @@ it and take one more from the grid.
 | *Could not confidently identify recent videos* | The grid had not rendered. Scroll the page once and click again. |
 | *Extension was reloaded — refresh this page* | You reloaded the extension while this tab was open. Refresh the tab. |
 | **Copy 12 URLs** shows *Found N of 12* on a big channel | The grid had not finished loading. Scroll down a little, scroll back, and retry. |
+| **Copy 12 URLs** / **Copy Channel Details** shows *Review video status* | One card's published/scheduled/live status is unclear. Hover for which card. If *every* channel does this, check YouTube's UI language is English. |
+| **Copy Channel Details** shows *Channel identity unclear* | The channel header does not match the page URL or tab title. Reload the page. |
 | Numbers differ from YouTube's own display | Expected. YouTube rounds (`187K`); the API gives exact counts, and this tool trims the high and low. |
 
 ## 15a. Pinned or featured videos
@@ -474,6 +559,10 @@ still excluded. No special-case logic was added, because none is required.
   respectively — because the coach confirmed them separately. See the note in
   section 5; a 5-video channel showing `40K*` next to a clean `3.00%` is
   expected behaviour.
+- **Validation status (1.2.0 candidate).** Automated tests, mutation tests and
+  a real-Chromium run on *simulated* YouTube pages pass. It has **not** been
+  validated on live YouTube; the live checks are listed in
+  RELEASE_NOTES_v1.2.0.md §9 and must pass before production use.
 - **Validation status (1.1.0).** The installed extension has been validated
   live in everyday Chrome with a real API key: full-sample and sparse creators,
   the trimmed average, engagement, audit panels, compact copy states, the
@@ -483,12 +572,13 @@ still excluded. No special-case logic was added, because none is required.
   Settings page's **Key isolation** row is what confirms the storage
   restriction on each machine — check it once per install. Re-run section 17
   after any YouTube layout change.
-- **Scheduled Premieres in Copy 12 URLs.** A pre-recorded Premiere scheduled on
-  the Videos tab (badge *Upcoming*) is exported like a published video. On the
-  live page a scheduled card uses the same badge class and item attributes as a
-  published one; only localized text differs, so there is no reliable
-  structural signal and no text guessing was added. Scheduled *live streams*
-  are unaffected — they sit on the Live tab, which the export never reads.
+- **Publication status is read from English UI text (1.2.0 candidate).** A
+  scheduled card uses the same structure as a published one, so the two
+  Latest exports read each card's own status text. In a non-English YouTube UI
+  they fail closed (*Review video status*) rather than guess. These markers are
+  not yet validated on live pages — see RELEASE_NOTES_v1.2.0.md §9.
+- **Copy all video URLs is bounded by the page.** Whether YouTube discards
+  earlier cards during very deep scrolling has not been measured yet.
 - **Bar's channel attribute after SPA navigation.** YouTube does not update
   `<meta itemprop="identifier">` when you move between channels without a page
   reload, so the bar's internal `data-thq-channel` attribute can keep the
@@ -563,6 +653,19 @@ change.
     expect the exact integer (e.g. `67814`), not `67.8K`. Repeat for the
     engagement control and the panel's Copy buttons.
 
+**Exports (1.2.0 candidate)** — the full live checklist is in
+RELEASE_NOTES_v1.2.0.md §9. In short:
+
+15. On a channel with an upcoming Premiere on its Videos tab, **Copy 12 URLs**
+    and **Copy Channel Details** both skip it and agree on videos 1–12;
+    **Copy all video URLs** includes it.
+16. On a channel with completed Premieres, they are included (no *Review video
+    status*).
+17. On Popular/Oldest, the two Latest exports refuse and the clipboard is
+    unchanged; Copy all video URLs works and its `Sort:` line is correct.
+18. Scroll deep on a long channel and confirm Copy all video URLs' `Total URLs`
+    matches the cards from the top to where you stopped.
+
 Record any mismatch with the channel URL, what you expected, and what the panel
 showed.
 
@@ -596,13 +699,13 @@ No test framework and no npm install. With Node:
 npm test
 ```
 
-which runs all four suites with Node. Or with Deno:
+which runs all six suites with Node. Or with Deno:
 
 ```bash
-for t in calculations youtube-api clipboard url-export; do deno run --allow-read tests/$t.test.mjs; done
+for t in calculations youtube-api clipboard url-export video-selection channel-details; do deno run --allow-read tests/$t.test.mjs; done
 ```
 
-139 tests in four suites. The calculation and API suites (75) cover the trimmed average (including duplicate and all-equal extremes),
+222 tests in six suites (1.2.0 candidate). The calculation and API suites (75) cover the trimmed average (including duplicate and all-equal extremes),
 small-sample and insufficient-sample states, hidden statistics, the per-video ER
 formula, both aggregations and the fact that they differ, calendar-month cutoff
 boundaries, duration parsing, long-form eligibility, completed-Premiere
@@ -610,8 +713,17 @@ handling, the trimmed creator engagement rate (including duplicate extremes, una
 observations, and every sample band from 0 to 12), and storage-isolation policy.
 The clipboard suite (20) covers every compact copy state; the URL-export suite
 (44) covers the 12-URL format, ordering, Shorts and sort rules, lazy loading,
-the Ready fallback's safety and lock release. Both run against the real
-shipped content scripts and await every test.
+the Ready fallback's safety and lock release. The selection suite (54) covers
+publication-state reading on simulated modern and legacy card markup,
+scheduled/live exclusion, fail-closed cases, the shared 12-video selection and
+the general all-URLs export; the channel-details suite (29) covers the header
+reader, identity checks, the JSON block and agreement between the two Latest
+exports. All run against the real shipped content scripts and await every
+test.
+
+Optional, developer-only: `node tests/browser/extension-harness.mjs` loads the
+real extension into Chromium (needs Playwright) and drives it on simulated
+YouTube pages served locally — no network, not live YouTube.
 
 ## 19. Project layout
 
@@ -621,9 +733,13 @@ background/service-worker.js   Only holder of the API key; only network caller
 content/render.js              Shadow DOM styles + every audit-panel builder.
                                Loaded first as a content script, and also by the
                                fixture page, so both render through one code path.
-content/url-export.js          "Copy 12 URLs": formatting, structural filtering,
-                               bounded top-up, Ready fallback, DOM lock.
-                               No API, no key, no network.
+content/video-selection.js     Shared card reader: publication status, the one
+                               12-video selector, the all-URLs inventory.
+content/url-export.js          Export operations for Copy 12 URLs / Channel
+                               Details (bounded top-up, Ready fallback) and
+                               Copy all video URLs; formatting; DOM lock.
+content/channel-details.js     Channel-header reader + JSON evidence block.
+                               None of the three: no API, no key, no network.
 content/content.js             DOM discovery + UI state (never sees the key)
                                Two shadow hosts: the compact bar in the channel
                                header, the audit panel above the video grid.
@@ -634,6 +750,9 @@ lib/security.js                Storage-isolation policy (pure, unit-tested)
 lib/analysis.js                Turns one fetch into both metrics
 options/                       Settings page
 tests/                         Dependency-free deterministic tests
+tests/fixtures/                SIMULATED YouTube markup for the reader tests
+tests/browser/                 Optional real-Chromium harness (Playwright)
+docs/v1.2.0-candidate-examples Clipboard examples generated from simulated pages
 tests/manual-fixtures.html     DEVELOPER-ONLY page for eyeballing rare states.
                                Delete it and manual-fixtures.js to remove.
 tools/make-icons.py            Dev utility to regenerate the icons

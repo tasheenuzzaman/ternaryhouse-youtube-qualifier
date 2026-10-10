@@ -1,36 +1,40 @@
 /**
- * Ternary House YouTube Qualifier — "Copy 12 URLs" export.
+ * Ternary House YouTube Qualifier — URL and evidence exports.
  *
- * Copies the canonical watch URLs of the 12 newest normal uploads on a
- * channel's Videos -> Latest grid, numbered 1-12, newest first.
+ *   Copy 12 URLs          the canonical watch URLs of the 12 newest PUBLISHED
+ *                         normal uploads on a channel's Videos -> Latest grid,
+ *                         numbered 1-12, newest first.
+ *   Copy Channel Details  the same 12, through the same selector and the same
+ *                         export operation, formatted as a JSON evidence block
+ *                         by content/channel-details.js.
+ *   Copy all video URLs   every unique watch URL currently loaded in the
+ *                         Videos grid, any sort, in card order, uncapped.
  *
- * This is a SEPARATE pipeline from the Avg Views / Engagement metrics. It does
- * not use the 3-month window, sample rules, trimming, the service worker, the
- * YouTube Data API, or an API key. It reads what the page already shows and
- * writes to the clipboard. The metric candidate collector is not used or
+ * These are SEPARATE pipelines from the Avg Views / Engagement metrics. They
+ * do not use the 3-month window, sample rules, trimming, the service worker,
+ * the YouTube Data API, or an API key. They read what the page already shows
+ * and write to the clipboard. The metric candidate collector is not used or
  * changed by anything in this file.
  *
- * A CLASSIC script (not an ES module), loaded after content/render.js and
- * before content/content.js, sharing their isolated-world scope, the same
- * pattern render.js uses. Everything here is deterministic and testable: the
- * only DOM access is the read-only readGridEntries(), and all side effects
- * (scrolling, clipboard, sort detection) are injected by the caller.
+ * A CLASSIC script (not an ES module), loaded after content/video-selection.js
+ * and before content/content.js, sharing their isolated-world scope. Card
+ * reading and the publication-aware 12-video selection live in
+ * video-selection.js; this file re-exports them so existing callers keep one
+ * import. All side effects (scrolling, clipboard, sort detection) are injected
+ * by the caller.
  */
 
 (() => {
   'use strict';
 
+  const {
+    WATCH_BASE, SORT_LABELS, isValidVideoId, canonicalWatchUrl, watchIdFromHref,
+    readVideoCards, readLoadedVideoUrls, selectEligibleVideos,
+  } = self.THQVideoSelection;
+
   const EXPORT_COUNT = 12;
-  const WATCH_BASE = 'https://www.youtube.com/watch?v=';
-  const VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
-  const YOUTUBE_HOSTS = new Set(['www.youtube.com', 'youtube.com', 'm.youtube.com']);
 
-  /** Same item selector the metric harvester uses, so both read one surface. */
-  const ITEM_SELECTOR = 'ytd-rich-item-renderer, ytd-grid-video-renderer';
-  /** Upper bound on grid items inspected per read. Never a crawl. */
-  const MAX_ITEMS_READ = 60;
-
-  /** Every label the action button can show. */
+  /** Every label the Copy 12 URLs button can show. */
   const EXPORT_TEXT = Object.freeze({
     IDLE: 'Copy 12 URLs',
     WORKING: 'Copying...',
@@ -38,40 +42,15 @@
     WRONG_SORT: 'Switch to Latest',
     COPY_FAILED: 'Copy failed',
     READY: 'Ready — click to copy',
+    REVIEW_STATUS: 'Review video status',
+    REVIEW_ORDER: 'Review video order',
   });
 
   const foundText = (n) => `Found ${n} of ${EXPORT_COUNT}`;
 
   /* ------------------------------------------------------------------ *
-   * Identity and formatting
+   * Formatting
    * ------------------------------------------------------------------ */
-
-  function isValidVideoId(id) {
-    return typeof id === 'string' && VIDEO_ID_RE.test(id);
-  }
-
-  /** The only URL shape ever exported. Null for anything that is not an ID. */
-  function canonicalWatchUrl(id) {
-    return isValidVideoId(id) ? `${WATCH_BASE}${id}` : null;
-  }
-
-  /**
-   * Extract a video ID from a normal /watch link. Any timestamp, playlist,
-   * feature, share or tracking parameter, and any hash, is discarded because
-   * only `v` is read. /shorts/, /live/ and every non-/watch path yield null.
-   */
-  function watchIdFromHref(href) {
-    if (typeof href !== 'string' || !href) return null;
-    let url;
-    try {
-      url = new URL(href, 'https://www.youtube.com');
-    } catch {
-      return null;
-    }
-    if (!YOUTUBE_HOSTS.has(url.hostname) || url.pathname !== '/watch') return null;
-    const id = url.searchParams.get('v');
-    return isValidVideoId(id) ? id : null;
-  }
 
   /**
    * The paste-ready clipboard block, or null unless given exactly 12 unique
@@ -91,70 +70,9 @@
     return ids.map((id, i) => `${i + 1}. ${WATCH_BASE}${id}`).join('\n');
   }
 
-  /* ------------------------------------------------------------------ *
-   * Reading the grid (read-only DOM access)
-   * ------------------------------------------------------------------ */
-
-  /**
-   * One entry per grid item, in visible order: `{ shorts, href }`.
-   *
-   * Mirrors the structural rules of the metric harvester exactly: the same
-   * item selector, an item containing a /shorts/ link is a Short, and the
-   * video link is the item's first /watch?v= anchor. Unlike the metric
-   * harvester, an item whose link has not rendered yet is REPORTED (href null)
-   * rather than silently dropped, because for this export a skipped item would
-   * shift every later URL up one position.
-   */
-  function readGridEntries(grid, maxItems = MAX_ITEMS_READ) {
-    if (!grid || typeof grid.querySelectorAll !== 'function') return [];
-    const entries = [];
-    const items = grid.querySelectorAll(ITEM_SELECTOR);
-
-    if (items.length) {
-      for (const item of items) {
-        const shorts = Boolean(item.querySelector('a[href^="/shorts/"]'));
-        const anchor = item.querySelector('a[href*="/watch?v="]');
-        entries.push({ shorts, href: anchor ? anchor.getAttribute('href') : null });
-        if (entries.length >= maxItems) break;
-      }
-      return entries;
-    }
-
-    // Same fallback as the metric harvester when no item renderers exist.
-    for (const anchor of grid.querySelectorAll('a[href*="/watch?v="]')) {
-      if (anchor.closest && anchor.closest('ytd-reel-item-renderer, ytm-shorts-lockup-view-model')) continue;
-      entries.push({ shorts: false, href: anchor.getAttribute('href') });
-      if (entries.length >= maxItems) break;
-    }
-    return entries;
-  }
-
-  /**
-   * The first `count` unique normal-video IDs, newest first.
-   *
-   * Shorts are excluded structurally. Runtime is never considered: a 0:58
-   * /watch?v= upload on the Videos tab is a normal upload. Collection STOPS at
-   * the first item that has not rendered its link yet (`pending: true`), so a
-   * later video can never be promoted into an earlier slot.
-   */
-  function selectExportIds(entries, count = EXPORT_COUNT) {
-    const ids = [];
-    const seen = new Set();
-    let pending = false;
-    for (const entry of entries || []) {
-      if (ids.length >= count) break;
-      if (!entry || entry.shorts) continue;
-      if (!entry.href) {
-        pending = true;
-        break;
-      }
-      const id = watchIdFromHref(entry.href);
-      if (!id || seen.has(id)) continue;
-      seen.add(id);
-      ids.push(id);
-    }
-    return { ids, pending };
-  }
+  /** Back-compat names: the 12-video selector is the shared publication-aware one. */
+  const readGridEntries = readVideoCards;
+  const selectExportIds = selectEligibleVideos;
 
   /* ------------------------------------------------------------------ *
    * Mutual exclusion for page-scrolling work
@@ -189,12 +107,16 @@
   }
 
   /* ------------------------------------------------------------------ *
-   * The export operation
+   * The Latest-only 12-video export operation
    * ------------------------------------------------------------------ */
 
+  /** Default output: the locked 12-line URL block. */
+  const urlBlockFormat = (selection) => ({ text: formatExportBlock(selection.ids) });
+
   /**
-   * One exporter per Controller, so it is created and destroyed with the
-   * channel page it belongs to.
+   * One exporter per button per Controller, so it is created and destroyed
+   * with the channel page it belongs to. Copy 12 URLs and Copy Channel Details
+   * each get one; they differ only in `format`.
    *
    * deps:
    *   isLatest()       -> boolean   the existing Latest-sort detector
@@ -202,12 +124,14 @@
    *   isAlive()        -> boolean   the owning Controller is still mounted
    *   readEntries()    -> entries   readGridEntries() over the live grid
    *   loadMore({scroll}) -> Promise one bounded step: scroll for more items, or
-   *                                 (scroll: false) just wait for a pending
-   *                                 item to finish rendering
+   *                                 (scroll: false) just wait for a pending or
+   *                                 undecided item to finish rendering
    *   saveScroll()     -> token
    *   restoreScroll(t)
    *   copy(text)       -> Promise<boolean>   the existing clipboard helper
    *   lock                          createDomLock(), shared with metrics
+   *   format(selection) -> { text } | { status, ... }   default: 12-line block
+   *   name             lock holder name, default 'export'
    *   maxLoadSteps     default 4
    *   readyTtlMs       default 60000
    *   now()            default Date.now
@@ -216,6 +140,9 @@
     const maxLoadSteps = deps.maxLoadSteps ?? 4;
     const readyTtlMs = deps.readyTtlMs ?? 60000;
     const now = deps.now || (() => Date.now());
+    const format = deps.format || urlBlockFormat;
+    const lockName = deps.name || 'export';
+    const select = () => selectEligibleVideos(deps.readEntries(), EXPORT_COUNT);
 
     let running = false;
     // A prepared block exists ONLY after a copy attempt failed following
@@ -241,61 +168,75 @@
       // position. A matching PREFIX is not enough: if the grid currently
       // exposes only the first N, the other 12 - N slots are unverified, so
       // the prepared block is refused and never copied.
-      const live = selectExportIds(deps.readEntries(), EXPORT_COUNT).ids;
-      if (live.length !== EXPORT_COUNT) return false;
-      return live.every((id, i) => id === p.ids[i]);
+      const live = select();
+      if (live.ids.length !== EXPORT_COUNT || live.orderAnomaly) return false;
+      return live.ids.every((id, i) => id === p.ids[i]);
     }
 
     /** Collect under the DOM lock; restore scroll in `finally`. */
     async function collect(scope) {
-      let { ids, pending } = selectExportIds(deps.readEntries(), EXPORT_COUNT);
+      let selection = select();
       let scrollToken = null;
       let loaded = false;
       try {
-        for (let step = 0; ids.length < EXPORT_COUNT && step < maxLoadSteps; step += 1) {
+        for (let step = 0; selection.ids.length < EXPORT_COUNT && step < maxLoadSteps; step += 1) {
           if (scrollToken === null) scrollToken = deps.saveScroll();
           loaded = true;
-          const before = ids.length;
+          const before = selection.ids.length;
+          // A pending or undecided item is already on the page and only needs
+          // to finish rendering: wait for it without scrolling (which would
+          // make YouTube append unrelated items). Otherwise scroll for more.
+          const waiting = selection.pending || Boolean(selection.blocked);
           try {
-            // A pending item is already on the page and only needs to finish
-            // rendering: wait for it without scrolling (which would make
-            // YouTube append unrelated items). Otherwise scroll for more.
-            await deps.loadMore({ scroll: !pending });
+            await deps.loadMore({ scroll: !waiting });
           } catch {
             break;
           }
           if (!sameScope(scope)) return { aborted: true };
           if (!deps.isLatest()) return { wrongSort: true };
-          ({ ids, pending } = selectExportIds(deps.readEntries(), EXPORT_COUNT));
-          // Nothing pending and nothing new: the grid has no more to give.
-          // While an item is still rendering, keep waiting (bounded).
-          if (!pending && ids.length === before) break;
+          selection = select();
+          // Nothing pending or undecided and nothing new: the grid has no
+          // more to give. While an item is still rendering, keep waiting
+          // (bounded).
+          if (!selection.pending && !selection.blocked && selection.ids.length === before) break;
         }
       } finally {
         // Never scroll a page that is no longer this creator's.
         if (scrollToken !== null && sameScope(scope)) deps.restoreScroll(scrollToken);
       }
-      return { ids, loaded };
+      return { selection, loaded };
     }
 
     async function collectAndCopy() {
       const scope = deps.scopeKey();
       const lockWasBusy = deps.lock.holder !== null;
-      const collected = await deps.lock.run('export', () => collect(scope));
+      const collected = await deps.lock.run(lockName, () => collect(scope));
 
       if (collected.aborted || !sameScope(scope)) return { status: 'ABORTED' };
       if (collected.wrongSort) return { status: 'WRONG_SORT' };
 
-      const text = formatExportBlock(collected.ids);
-      if (!text) return { status: 'INSUFFICIENT', count: collected.ids.length };
+      const { selection } = collected;
+      const excludedCount = selection.excluded.length;
+      if (selection.ids.length < EXPORT_COUNT) {
+        if (selection.blocked) {
+          return { status: 'REVIEW_STATUS', count: selection.ids.length, blocked: selection.blocked, excludedCount };
+        }
+        return { status: 'INSUFFICIENT', count: selection.ids.length, excludedCount };
+      }
+      if (selection.orderAnomaly) return { status: 'REVIEW_ORDER', anomaly: selection.orderAnomaly, excludedCount };
 
-      if (await safeCopy(text)) return { status: 'COPIED', count: EXPORT_COUNT };
+      const formatted = format(selection) || {};
+      if (formatted.status) return { ...formatted, excludedCount };
+      const { text } = formatted;
+      if (!text) return { status: 'INSUFFICIENT', count: selection.ids.length, excludedCount };
+
+      if (await safeCopy(text)) return { status: 'COPIED', count: EXPORT_COUNT, excludedCount };
 
       // The copy ran after asynchronous waiting. If the browser refused it
       // because the click's user activation had expired, a second click (with
       // fresh activation) can copy the same, re-validated block.
       if (collected.loaded || lockWasBusy) {
-        prepared = { scope, ids: collected.ids.slice(), text, at: now() };
+        prepared = { scope, ids: selection.ids.slice(), text, excludedCount, at: now() };
         return { status: 'READY' };
       }
       return { status: 'COPY_FAILED' };
@@ -310,7 +251,7 @@
           prepared = null; // single-use, whatever happens next
           if (preparedStillValid(p)) {
             return (await safeCopy(p.text))
-              ? { status: 'COPIED', count: EXPORT_COUNT }
+              ? { status: 'COPIED', count: EXPORT_COUNT, excludedCount: p.excludedCount }
               : { status: 'COPY_FAILED' };
           }
         }
@@ -338,6 +279,8 @@
       case 'COPIED': return EXPORT_TEXT.COPIED;
       case 'WRONG_SORT': return EXPORT_TEXT.WRONG_SORT;
       case 'INSUFFICIENT': return foundText(result.count || 0);
+      case 'REVIEW_STATUS': return EXPORT_TEXT.REVIEW_STATUS;
+      case 'REVIEW_ORDER': return EXPORT_TEXT.REVIEW_ORDER;
       case 'READY': return EXPORT_TEXT.READY;
       case 'COPY_FAILED': return EXPORT_TEXT.COPY_FAILED;
       case 'ABORTED': return EXPORT_TEXT.IDLE;
@@ -345,18 +288,135 @@
     }
   }
 
+  /* ------------------------------------------------------------------ *
+   * Copy all video URLs — the general loaded-grid inventory
+   * ------------------------------------------------------------------ */
+
+  const ALL_URLS_TEXT = Object.freeze({
+    IDLE: 'Copy all video URLs',
+    NONE: 'No loaded video URLs',
+    NO_GRID: 'Video grid not found',
+    OFF_ROUTE: 'Open the Videos tab',
+    BUSY: 'Busy — retry',
+    COPY_FAILED: 'Copy failed',
+  });
+
+  const copiedUrlsText = (n) => `Copied ${n} URL${n === 1 ? '' : 's'}`;
+  const notReadyText = (n) => `${n} card${n === 1 ? '' : 's'} not ready — retry`;
+
+  /**
+   * The general inventory block, or null for an empty or malformed list:
+   *
+   *   Total URLs: 347
+   *   Sort: Oldest
+   *
+   *   1. https://www.youtube.com/watch?v=AAAAAAAAAAA
+   *   ...
+   *   347. https://www.youtube.com/watch?v=ZZZZZZZZZZZ
+   *
+   * The count is the number of numbered lines. Plain text, no trailing
+   * newline. An unrecognised sort is written as `Unknown`.
+   */
+  function formatAllUrlsBlock(ids, sortLabel) {
+    if (!Array.isArray(ids) || !ids.length) return null;
+    if (!ids.every(isValidVideoId)) return null;
+    if (new Set(ids).size !== ids.length) return null;
+    const sort = SORT_LABELS.includes(sortLabel) ? sortLabel : 'Unknown';
+    return [
+      `Total URLs: ${ids.length}`,
+      `Sort: ${sort}`,
+      '',
+      ...ids.map((id, i) => `${i + 1}. ${WATCH_BASE}${id}`),
+    ].join('\n');
+  }
+
+  /**
+   * Copy all video URLs. One synchronous read of the live grid per click,
+   * then the clipboard write is started in the same click, so there is no
+   * prepared block that could outlive a sort, creator or grid change.
+   * No scrolling, no loading, no cap, no sort guard.
+   *
+   * deps:
+   *   isAlive()        -> boolean
+   *   onVideosRoute()  -> boolean   still on this creator's Videos tab
+   *   isBusy()         -> boolean   another export or metric is scrolling
+   *   readInventory()  -> readLoadedVideoUrls(grid)
+   *   readSort()       -> 'Latest' | 'Popular' | 'Oldest' | 'Unknown'
+   *   copy(text)       -> Promise<boolean>
+   */
+  function createAllUrlsExporter(deps) {
+    let running = false;
+
+    async function click() {
+      if (running) return { status: 'IGNORED' };
+      running = true;
+      try {
+        if (!deps.isAlive()) return { status: 'ABORTED' };
+        if (!deps.onVideosRoute()) return { status: 'OFF_ROUTE' };
+        if (deps.isBusy()) return { status: 'BUSY' };
+
+        const sort = deps.readSort();
+        const inventory = deps.readInventory();
+        if (!inventory || !inventory.gridFound) return { status: 'NO_GRID' };
+        if (inventory.unresolved.length) {
+          return { status: 'NOT_READY', count: inventory.unresolved.length, unresolved: inventory.unresolved };
+        }
+        const text = formatAllUrlsBlock(inventory.ids, sort);
+        if (!text) return { status: 'NONE' };
+
+        let ok = false;
+        try {
+          ok = Boolean(await deps.copy(text));
+        } catch {
+          ok = false;
+        }
+        return ok
+          ? { status: 'COPIED', count: inventory.ids.length, sort: SORT_LABELS.includes(sort) ? sort : 'Unknown', inventory }
+          : { status: 'COPY_FAILED' };
+      } catch {
+        return { status: 'COPY_FAILED' };
+      } finally {
+        running = false;
+      }
+    }
+
+    return {
+      click,
+      get running() { return running; },
+    };
+  }
+
+  function allUrlsButtonText(result) {
+    switch (result && result.status) {
+      case 'COPIED': return copiedUrlsText(result.count || 0);
+      case 'NONE': return ALL_URLS_TEXT.NONE;
+      case 'NO_GRID': return ALL_URLS_TEXT.NO_GRID;
+      case 'OFF_ROUTE': return ALL_URLS_TEXT.OFF_ROUTE;
+      case 'BUSY': return ALL_URLS_TEXT.BUSY;
+      case 'NOT_READY': return notReadyText(result.count || 0);
+      case 'COPY_FAILED': return ALL_URLS_TEXT.COPY_FAILED;
+      case 'ABORTED': return ALL_URLS_TEXT.IDLE;
+      default: return null;
+    }
+  }
+
   self.THQUrlExport = {
     EXPORT_COUNT,
     EXPORT_TEXT,
+    ALL_URLS_TEXT,
     foundText,
     isValidVideoId,
     canonicalWatchUrl,
     watchIdFromHref,
     formatExportBlock,
+    formatAllUrlsBlock,
     readGridEntries,
+    readLoadedVideoUrls,
     selectExportIds,
     createDomLock,
     createUrlExporter,
+    createAllUrlsExporter,
     exportButtonText,
+    allUrlsButtonText,
   };
 })();

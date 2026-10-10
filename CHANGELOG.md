@@ -5,7 +5,77 @@ All notable changes to Ternary House YouTube Qualifier.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 This is an internal tool; versions are not published to the Chrome Web Store.
 
-**Current: 1.1.0.** 1.0.0, 1.0.1 and 1.0.2 remain frozen and archived as historical releases.
+**Current stable: 1.1.0.** 1.2.0 is a CANDIDATE under acceptance testing (not
+authorized for production). 1.0.0, 1.0.1 and 1.0.2 remain frozen and archived
+as historical releases.
+
+---
+
+## [1.2.0-candidate] — 2026-10-10 — CANDIDATE, NOT AUTHORIZED FOR PRODUCTION
+
+Implements `TERNARY_HOUSE_YOUTUBE_QUALIFIER_CHANNEL_DETAILS_AND_ALL_URLS_IMPLEMENTATION_BRIEF_v1.2.md`.
+Full notes: [RELEASE_NOTES_v1.2.0.md](RELEASE_NOTES_v1.2.0.md). **Not yet
+validated on live YouTube** (the build environment could not reach it).
+
+### Fixed
+
+- **Copy 12 URLs no longer exports unpublished scheduled Premieres** or
+  live/upcoming broadcasts. They are skipped and do not count toward 12;
+  completed Premieres and normal uploads (including 0:58 ones) stay. Output
+  format unchanged. A card whose status cannot be established fails closed
+  (`Review video status`) instead of being treated as published.
+
+### Added
+
+- **Copy Channel Details** — one strict-JSON browser-evidence block
+  (`TERNARY_HOUSE_BROWSER_EVIDENCE_INPUT`, format 1.0, `source_ref` D1): page
+  channel identity, header description preview and counts, and the same 12
+  videos as Copy 12 URLs with per-card title, title source, age, runtime text
+  and publication basis. Not a CEP; never labelled READY.
+- **Copy all video URLs** — every unique watch URL in the loaded Videos-grid
+  cards, any sort, in on-page order, uncapped, no scrolling; `Total URLs` /
+  `Sort` header plus numbered lines.
+- `content/video-selection.js` — shared card reader and publication-aware
+  12-video selector used by both Latest exports; the general inventory reader.
+- `content/channel-details.js` — channel-header reader, identity cross-checks,
+  JSON builder.
+- `Review video order` refusal when displayed ages show the Latest grid is not
+  in date order (pinned or reordered card).
+- Toast `Skipped N upcoming/live videos (not published)`; refusal tooltips
+  name the grid position and video ID.
+
+### Changed
+
+- `createUrlExporter()` takes an optional `format`, so Copy 12 URLs and Copy
+  Channel Details are one operation over one selector; an undecided card is
+  waited for (without scrolling) like an unrendered one.
+- Refusal labels stay 6 s (was 2.5 s) so the tooltip can be read.
+- Manifest: two content-script files added; version `1.2.0`,
+  `version_name: 1.2.0-candidate`. Permissions unchanged.
+
+### Unchanged — verified by diff
+
+Everything in `lib/`, `background/`, `options/`, `content/render.js`,
+`content/content.css`; `collectVideoIds()`, `harvestVideoIds()`,
+`TARGET_CANDIDATES` (30), `checkLatestOrdering()`, `readSortChips()`, the
+`ANALYZE` request, permissions, key handling and storage isolation.
+
+### Tests
+
+139 -> **222**: new `video-selection.test.mjs` (54) and
+`channel-details.test.mjs` (29), with a small dependency-free test DOM
+(`tests/helpers/mini-dom.mjs`) and SIMULATED YouTube markup
+(`tests/fixtures/youtube-markup.mjs`). In `url-export.test.mjs` the loader
+also evaluates `video-selection.js`, and the `video()` helper and test F's
+entries now declare `state: 'PUBLISHED_COMPLETED'`; no assertion changed.
+Mutation-tested (22 defects, 21 caught, 1 equivalent). Optional real-Chromium
+harness `tests/browser/extension-harness.mjs` (41 checks, simulated pages).
+
+### Known limitations
+
+Publication state is read from YouTube's English UI text; other UI languages
+fail closed. Live markers, deep-scroll virtualization and the downstream
+Evidence Maker change are not yet validated. See the release notes, §9–§10.
 
 ---
 

@@ -33,7 +33,12 @@ function equal(a, e, l = 'value') {
 
 const here = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(join(here, '..', 'content', 'url-export.js'), 'utf8');
+// v1.2: url-export.js takes its URL primitives and the shared card selector
+// from content/video-selection.js, which the manifest loads first.
+const selectionSource = readFileSync(join(here, '..', 'content', 'video-selection.js'), 'utf8');
 const selfStub = {};
+// eslint-disable-next-line no-new-func
+new Function('self', selectionSource)(selfStub);
 // eslint-disable-next-line no-new-func
 new Function('self', source)(selfStub);
 const X = selfStub.THQUrlExport;
@@ -64,8 +69,13 @@ const EXPECTED_BLOCK = [
   '12. https://www.youtube.com/watch?v=LLLLLLLLLL2',
 ].join('\n');
 
-/** Grid entries as readGridEntries() produces them. */
-const video = (id, extra = '') => ({ shorts: false, href: `/watch?v=${id}${extra}` });
+/**
+ * Grid entries as readGridEntries() produces them. v1.2: every normal entry
+ * carries the publication state the production reader always reads from its
+ * card; these fixtures are ordinary published uploads.
+ */
+const PUBLISHED = 'PUBLISHED_COMPLETED';
+const video = (id, extra = '') => ({ shorts: false, href: `/watch?v=${id}${extra}`, state: PUBLISHED });
 const short = (id) => ({ shorts: true, href: null, shortsId: id });
 const pending = () => ({ shorts: false, href: null });
 
@@ -185,7 +195,7 @@ test('F. links are canonicalised: only the video ID survives', () => {
     '/watch?v=KKKKKKKKK-1&lc=Ugx',
     '/watch?v=LLLLLLLLLL2&pp=ygU2#t=10',
   ];
-  const { ids } = X.selectExportIds(noisy.map((href) => ({ shorts: false, href })));
+  const { ids } = X.selectExportIds(noisy.map((href) => ({ shorts: false, href, state: PUBLISHED })));
   equal(X.formatExportBlock(ids), EXPECTED_BLOCK, 'canonical output');
   for (const line of X.formatExportBlock(ids).split('\n')) {
     assert(/^\d{1,2}\. https:\/\/www\.youtube\.com\/watch\?v=[A-Za-z0-9_-]{11}$/.test(line), `canonical: ${line}`);

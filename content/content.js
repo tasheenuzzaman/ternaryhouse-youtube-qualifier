@@ -6,8 +6,10 @@
  *   2. discover the recent long-form video ids in page order;
  *   3. ask the service worker for one analysis;
  *   4. render the two compact controls and their audit panels;
- *   5. host the "Copy 12 URLs" action (content/url-export.js), which reads
- *      the visible grid and needs no API, key or service-worker call.
+ *   5. host the three page-only exports — "Copy 12 URLs", "Copy Channel
+ *      Details" and "Copy all video URLs" (content/video-selection.js,
+ *      content/url-export.js, content/channel-details.js) — which read the
+ *      page and need no API, key or service-worker call.
  *
  * It never sees the YouTube API key and never makes a network request.
  */
@@ -97,6 +99,27 @@
     }
 
     return { latest: true, message: null };
+  }
+
+  /**
+   * The active chip and its text, for labelling the general URL export only.
+   * Same chips and selection rule as readSortChips(), which the Latest guard
+   * keeps using unchanged.
+   */
+  function readSortChipState() {
+    for (const selector of SORT_CHIP_SELECTORS) {
+      const nodes = Array.from(document.querySelectorAll(selector));
+      if (nodes.length > 1) {
+        const selectedIndex = nodes.findIndex((node) => (
+          node.getAttribute('aria-selected') === 'true'
+          || node.hasAttribute('selected')
+          || Boolean(node.querySelector('[aria-selected="true"]'))
+        ));
+        const selected = selectedIndex >= 0 ? nodes[selectedIndex] : null;
+        return { count: nodes.length, selectedIndex, selectedText: selected ? selected.textContent : '' };
+      }
+    }
+    return null;
   }
 
   function detectChannelIdentity(route) {
@@ -270,20 +293,72 @@
   } = self.THQRender;
 
   /* ================================================================== *
-   * "Copy 12 URLs" export — content/url-export.js, loaded before this file.
+   * Page-only exports — content/video-selection.js, content/url-export.js
+   * and content/channel-details.js, loaded before this file.
    *
-   * A separate pipeline from the metrics. It never calls collectVideoIds(),
-   * never changes TARGET_CANDIDATES, and never sends ANALYZE.
+   * Separate pipelines from the metrics. They never call collectVideoIds(),
+   * never change TARGET_CANDIDATES, and never send ANALYZE.
    * ================================================================== */
 
+  const { sortLabelFromChips } = self.THQVideoSelection;
   const {
-    EXPORT_TEXT, readGridEntries, createDomLock, createUrlExporter, exportButtonText,
+    EXPORT_TEXT, ALL_URLS_TEXT, readGridEntries, readLoadedVideoUrls, createDomLock,
+    createUrlExporter, createAllUrlsExporter, exportButtonText, allUrlsButtonText,
   } = self.THQUrlExport;
+  const {
+    DETAILS_TEXT, findChannelHeader, readChannelHeader, createDetailsFormat, detailsButtonText,
+  } = self.THQChannelDetails;
 
   const EXPORT_STEP_TIMEOUT_MS = 2500;
   const EXPORT_SETTLE_MS = 250;
   const EXPORT_LABEL_RESET_MS = 2500;
+  const EXPORT_NOTICE_RESET_MS = 6000;
   const EXPORT_READY_TTL_MS = 60000;
+
+  /** The installed build, recorded in the evidence block. Null if unavailable. */
+  function extensionVersion() {
+    try {
+      const manifest = chrome.runtime.getManifest();
+      return manifest.version_name || manifest.version || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Operator-facing explanation of an export refusal, shown as a tooltip. */
+  function exportResultDetail(result) {
+    switch (result && result.status) {
+      case 'REVIEW_STATUS': {
+        const b = result.blocked;
+        if (!b) return 'A selected video card could not be read completely. Nothing was copied.';
+        const seen = b.evidence ? ` It shows: "${b.evidence}".` : '';
+        return `Grid card ${b.gridPosition} (${b.videoId}): its published/scheduled/live status could not be confirmed (${b.basis}).${seen} Nothing was copied — check that card, then retry.`;
+      }
+      case 'REVIEW_ORDER': {
+        const a = result.anomaly;
+        return `Grid card ${a.gridPosition} (${a.videoId}) shows "${a.publishedText}" below an older "${a.after}". The grid is not in date order, so the newest 12 cannot be taken from it. Nothing was copied.`;
+      }
+      case 'INSUFFICIENT':
+        return `Only ${result.count || 0} published videos could be read. Scroll the grid and retry; if the grid has ended, the channel may have fewer. Nothing was copied.`;
+      case 'CHANNEL_UNCLEAR':
+        return `The channel header did not match this page (${(result.problems || []).join(', ')}). Reload the page and retry. Nothing was copied.`;
+      case 'NOT_READY':
+        return `Grid card(s) ${result.unresolved.map((u) => u.position).join(', ')} have not finished rendering. Wait a moment and retry. Nothing was copied.`;
+      case 'COPIED':
+        if (result.inventory) {
+          const inv = result.inventory;
+          const extra = [
+            inv.duplicates ? `${inv.duplicates} duplicate card(s) ignored` : null,
+            inv.shorts ? `${inv.shorts} Shorts card(s) ignored` : null,
+            inv.nonVideo ? `${inv.nonVideo} non-video card(s) ignored` : null,
+          ].filter(Boolean).join('; ');
+          return `${result.count} unique video URLs from ${inv.cardCount} loaded grid card(s). Sort: ${result.sort}.${extra ? ` ${extra}.` : ''} Only cards loaded on the page are included.`;
+        }
+        return null;
+      default:
+        return null;
+    }
+  }
 
   /**
    * One bounded lazy-load step for the URL export. With `scroll`, scroll to
@@ -340,7 +415,6 @@
 
       // Page-scrolling work (metric candidate top-up, URL top-up) takes turns.
       this.domLock = createDomLock();
-      this.exporter = this.createExporter();
 
       // The compact bar belongs in the channel header, but the audit panel
       // must NOT expand there: the header's action row does not grow, so a
@@ -389,15 +463,49 @@
         this.engCopy,
       ]);
 
-      // An ACTION, not a metric: no data-metric, no tab or selection
-      // semantics, never opens the audit panel. It lives in the Ternary House
-      // bar, never in YouTube's own Latest / Popular / Oldest chip row.
-      this.exportLabel = el('span', { class: 'lbl', text: EXPORT_TEXT.IDLE });
-      this.exportBtn = el('button', {
-        class: 'pill thq-export',
-        type: 'button',
-        title: 'Copy the URLs of the 12 newest Videos-tab uploads',
-      }, [this.exportLabel]);
+      // ACTIONS, not metrics: no data-metric, no tab or selection semantics,
+      // never open the audit panel. They live in the Ternary House bar, never
+      // in YouTube's own Latest / Popular / Oldest chip row. Copy 12 URLs and
+      // Copy Channel Details share one selector; Copy all video URLs is the
+      // separate, sort-agnostic inventory of loaded cards.
+      this.urlsAction = this.makeAction({
+        idleText: EXPORT_TEXT.IDLE,
+        workingText: EXPORT_TEXT.WORKING,
+        title: 'Copy the URLs of the 12 newest published Videos-tab uploads (Latest only)',
+        exporter: this.createLatestExporter('export'),
+        textFor: exportButtonText,
+      });
+      this.detailsAction = this.makeAction({
+        idleText: DETAILS_TEXT.IDLE,
+        workingText: DETAILS_TEXT.WORKING,
+        title: 'Copy the channel details and the same 12 published videos as one JSON evidence block (Latest only)',
+        exporter: this.createLatestExporter('details', createDetailsFormat({
+          readPage: () => ({
+            header: readChannelHeader(findChannelHeader(document)),
+            route: parseChannelRoute(location.href),
+            documentTitle: document.title,
+          }),
+          now: () => Date.now(),
+          utcOffsetMinutes: (ms) => -new Date(ms).getTimezoneOffset(),
+          toolVersion: extensionVersion(),
+        })),
+        textFor: detailsButtonText,
+      });
+      this.allAction = this.makeAction({
+        idleText: ALL_URLS_TEXT.IDLE,
+        workingText: ALL_URLS_TEXT.IDLE,
+        title: 'Copy every video URL currently loaded in this Videos grid, in on-page order (any sort; no scrolling)',
+        exporter: createAllUrlsExporter({
+          isAlive: () => this.alive,
+          onVideosRoute: () => this.exportScopeKey() !== 'off-route',
+          isBusy: () => this.domLock.holder !== null,
+          readInventory: () => readLoadedVideoUrls(findGrid()),
+          readSort: () => sortLabelFromChips(readSortChipState()),
+          copy: (text) => copyToClipboard(text),
+        }),
+        textFor: allUrlsButtonText,
+      });
+      this.actions = [this.urlsAction, this.detailsAction, this.allAction];
 
       this.refreshBtn = el('button', { class: 'icon', type: 'button', title: 'Recalculate this channel' });
       this.refreshBtn.textContent = '⟳';
@@ -420,13 +528,15 @@
         () => compactCopyValue(this.engVal.textContent, 'engagement'),
         (text) => this.copyValue(text),
       );
-      this.exportBtn.addEventListener('click', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        this.onExportClick();
-      });
+      for (const action of this.actions) {
+        action.btn.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          this.onActionClick(action);
+        });
+      }
       this.refreshBtn.addEventListener('click', () => {
-        this.invalidateExport();
+        this.invalidateExports();
         this.run(true);
       });
 
@@ -434,7 +544,9 @@
         el('span', { class: 'brand', text: 'TH' }),
         this.viewsBtn,
         this.engBtn,
-        this.exportBtn,
+        this.urlsAction.btn,
+        this.detailsAction.btn,
+        this.allAction.btn,
         this.refreshBtn,
         this.toast,
       ]);
@@ -446,8 +558,10 @@
 
     destroy() {
       this.token = Symbol('dead');
-      if (this.exporter) this.exporter.invalidate();
-      clearTimeout(this._exportLabelTimer);
+      for (const action of this.actions || []) {
+        if (action.exporter.invalidate) action.exporter.invalidate();
+        clearTimeout(action.timer);
+      }
       for (const host of [this.barHost, this.panelHost]) {
         if (host && host.parentNode) host.parentNode.removeChild(host);
       }
@@ -486,10 +600,27 @@
       this._toastTimer = setTimeout(() => this.toast.classList.remove('on'), 1800);
     }
 
-    /* ---------------- "Copy 12 URLs" ---------------- */
+    showNote(text, failed = false) {
+      this.toast.textContent = text;
+      this.toast.classList.toggle('fail', failed);
+      this.toast.classList.add('on');
+      clearTimeout(this._toastTimer);
+      this._toastTimer = setTimeout(() => this.toast.classList.remove('on'), EXPORT_NOTICE_RESET_MS);
+    }
 
-    createExporter() {
+    /* ------------- Copy 12 URLs / Channel Details / all URLs ------------- */
+
+    makeAction({ idleText, workingText, title, exporter, textFor }) {
+      const label = el('span', { class: 'lbl', text: idleText });
+      const btn = el('button', { class: 'pill thq-export', type: 'button', title }, [label]);
+      return { btn, label, idleText, workingText, idleTitle: title, exporter, textFor, timer: null };
+    }
+
+    /** Copy 12 URLs and Copy Channel Details: same deps, different output. */
+    createLatestExporter(name, format) {
       return createUrlExporter({
+        name,
+        format,
         isLatest: () => checkLatestOrdering(this.route).latest,
         scopeKey: () => this.exportScopeKey(),
         isAlive: () => this.alive,
@@ -510,46 +641,63 @@
       return `${route.base}/${route.tab}|${this.identity.channelKey}`;
     }
 
-    async onExportClick() {
-      if (this.exporter.running) return;
-      clearTimeout(this._exportLabelTimer);
-      this.setExportLabel(EXPORT_TEXT.WORKING);
-      this.exportBtn.setAttribute('disabled', '');
+    /**
+     * The exporter is invoked synchronously from the click, so an export that
+     * needs no loading (always the case for Copy all video URLs) starts its
+     * clipboard write inside the click's user activation.
+     */
+    async onActionClick(action) {
+      if (action.exporter.running) return;
+      clearTimeout(action.timer);
+      this.setActionLabel(action, action.workingText);
+      action.btn.setAttribute('disabled', '');
       let result;
       try {
-        result = await this.exporter.click();
+        result = await action.exporter.click();
       } finally {
-        this.exportBtn.removeAttribute('disabled');
+        action.btn.removeAttribute('disabled');
       }
       if (!this.alive) return;
-      this.showExportResult(result);
+      this.showActionResult(action, result);
     }
 
-    showExportResult(result) {
-      const text = exportButtonText(result);
+    showActionResult(action, result) {
+      const text = action.textFor(result);
       if (text === null) return;
-      this.setExportLabel(text);
-      clearTimeout(this._exportLabelTimer);
+      this.setActionLabel(action, text, exportResultDetail(result));
+      clearTimeout(action.timer);
+      if (result.status === 'COPIED' && result.excludedCount) {
+        const n = result.excludedCount;
+        this.showNote(`Skipped ${n} upcoming/live video${n === 1 ? '' : 's'} (not published)`);
+      }
       if (result.status === 'READY') {
         // The label follows the prepared block's lifetime.
-        this._exportLabelTimer = setTimeout(() => this.invalidateExport(), EXPORT_READY_TTL_MS);
+        action.timer = setTimeout(() => this.invalidateAction(action), EXPORT_READY_TTL_MS);
         return;
       }
-      this._exportLabelTimer = setTimeout(() => this.setExportLabel(EXPORT_TEXT.IDLE), EXPORT_LABEL_RESET_MS);
+      const resetMs = result.status === 'COPIED' ? EXPORT_LABEL_RESET_MS : EXPORT_NOTICE_RESET_MS;
+      action.timer = setTimeout(() => this.setActionLabel(action, action.idleText), resetMs);
     }
 
-    invalidateExport() {
-      if (!this.exporter) return;
-      const hadPrepared = this.exporter.hasPrepared;
-      this.exporter.invalidate();
+    /** Discard one button's prepared block (expiry) and reset its label. */
+    invalidateAction(action) {
+      if (!action.exporter.invalidate) return;
+      const hadPrepared = action.exporter.hasPrepared;
+      action.exporter.invalidate();
       if (hadPrepared) {
-        clearTimeout(this._exportLabelTimer);
-        this.setExportLabel(EXPORT_TEXT.IDLE);
+        clearTimeout(action.timer);
+        this.setActionLabel(action, action.idleText);
       }
     }
 
-    setExportLabel(text) {
-      if (this.exportLabel) this.exportLabel.textContent = text;
+    /** Discard every prepared block (refresh). */
+    invalidateExports() {
+      for (const action of this.actions || []) this.invalidateAction(action);
+    }
+
+    setActionLabel(action, text, tooltip) {
+      action.label.textContent = text;
+      action.btn.title = tooltip || action.idleTitle;
     }
 
     onPillClick(event, metric) {
