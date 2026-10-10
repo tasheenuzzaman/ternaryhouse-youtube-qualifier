@@ -1,0 +1,10 @@
+{
+  "name": "ternaryhouse-youtube-qualifier",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Development metadata only. The extension itself has no runtime dependency on Node or npm; this file exists so the calculation tests can be run with plain Node.",
+  "scripts": {
+    "test": "node tests/calculations.test.mjs && node tests/youtube-api.test.mjs && node tests/clipboard.test.mjs && node tests/url-export.test.mjs"
+  }
+}

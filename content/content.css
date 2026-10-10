@@ -1,0 +1,37 @@
+/*
+ * The only styles that live in YouTube's own document.
+ *
+ * Everything else is inside the Shadow DOM, so YouTube's stylesheet and this
+ * extension's stylesheet cannot collide. These rules position the shadow host
+ * itself, which is the one element that has to sit in YouTube's layout.
+ */
+
+.thq-host {
+  display: block;
+  margin: 8px 0;
+  max-width: 100%;
+  /* Never sit above native controls. */
+  position: relative;
+  z-index: 0;
+}
+
+/* When appended into the channel header's action row, sit inline with the
+   native buttons instead of forcing a new block. */
+yt-flexible-actions-view-model > .thq-host,
+#buttons > .thq-host {
+  display: inline-block;
+  margin: 4px 0 4px 8px;
+  vertical-align: middle;
+}
+
+/* A closed audit panel must occupy no space at all. `.thq-host` sets an
+   explicit display, which would otherwise beat the browser's [hidden] rule. */
+.thq-host[hidden] {
+  display: none !important;
+}
+
+/* The audit panel sits above the video grid, full width of the content column. */
+.thq-panel-host {
+  display: block;
+  margin: 0 0 16px;
+}

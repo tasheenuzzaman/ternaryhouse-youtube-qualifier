@@ -1,0 +1,90 @@
+:root {
+  color-scheme: light dark;
+  --fg: #16181d;
+  --muted: #5c6370;
+  --bg: #f6f7f9;
+  --card: #ffffff;
+  --border: #d9dce1;
+  --accent: #1f5fbf;
+  --ok: #16713a;
+  --bad: #a32020;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #e8eaed;
+    --muted: #a0a6b0;
+    --bg: #14161a;
+    --card: #1d2026;
+    --border: #343841;
+    --accent: #7aa7ee;
+    --ok: #6fcf97;
+    --bad: #ff8a80;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 32px 16px;
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.card {
+  max-width: 620px;
+  margin: 0 auto;
+  padding: 24px 28px 28px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+h1 { margin: 0; font-size: 18px; }
+.sub { margin: 2px 0 20px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .6px; }
+h2 { margin: 18px 0 4px; font-size: 13px; letter-spacing: .3px; }
+
+label { display: block; font-weight: 600; margin-bottom: 6px; }
+
+.row { display: flex; gap: 8px; }
+
+input[type="password"], input[type="text"] {
+  flex: 1;
+  padding: 9px 11px;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+
+button {
+  padding: 8px 14px;
+  font: inherit;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+}
+button.ghost { background: transparent; color: var(--fg); border-color: var(--border); font-weight: 500; }
+button.ghost:hover { border-color: var(--accent); }
+button.danger { color: var(--bad); }
+button:disabled { opacity: .55; cursor: default; }
+
+.status { margin: 14px 0 0; min-height: 20px; font-size: 13px; }
+.status.ok { color: var(--ok); }
+.status.bad { color: var(--bad); }
+.status.muted { color: var(--muted); }
+
+.info { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
+.info p { margin: 6px 0; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+
+.small { margin: 2px 0 0; font-size: 12px; color: var(--muted); }

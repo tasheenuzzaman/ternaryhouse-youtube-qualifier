@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Ternary House YouTube Qualifier — Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main class="card">
+    <h1>Ternary House YouTube Qualifier</h1>
+    <p class="sub">Settings</p>
+
+    <form id="key-form" autocomplete="off">
+      <label for="api-key">YouTube Data API v3 key</label>
+      <div class="row">
+        <input
+          id="api-key"
+          name="api-key"
+          type="password"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="Paste your key here"
+        >
+        <button type="button" id="reveal" class="ghost" title="Show or hide the key">Show</button>
+      </div>
+
+      <div class="actions">
+        <button type="submit" id="save">Save</button>
+        <button type="button" id="test" class="ghost">Test API key</button>
+        <button type="button" id="clear" class="ghost danger">Remove key</button>
+      </div>
+    </form>
+
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+
+    <section class="info">
+      <h2>Key isolation</h2>
+      <p id="isolation" class="status muted">Checking…</p>
+      <p id="isolation-detail" class="small"></p>
+
+      <h2>Where the key is stored</h2>
+      <p>
+        The key is saved in this Chrome profile's extension storage on this
+        computer only, and it persists across browser restarts. It is sent only
+        to <code>googleapis.com</code>, and only by the extension's background
+        service worker. It is never written into a YouTube page, never logged,
+        and never included in an error message.
+      </p>
+      <p>
+        Extension storage is restricted to trusted contexts
+        (<code>setAccessLevel: TRUSTED_CONTEXTS</code>), so the content script
+        running inside youtube.com cannot read it either.
+      </p>
+      <p>
+        Each computer is configured separately. Using a different API key on
+        each machine is recommended for independent revocation and management.
+        API keys in the same Google Cloud project share that project's
+        YouTube Data API quota.
+      </p>
+
+      <h2>Methodology</h2>
+      <p>
+        The calculation method is fixed so that everyone at Ternary House
+        produces the same number. It is not configurable here.
+      </p>
+    </section>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>

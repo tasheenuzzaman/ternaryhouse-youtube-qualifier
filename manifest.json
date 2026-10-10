@@ -1,0 +1,51 @@
+{
+  "manifest_version": 3,
+  "name": "Ternary House YouTube Qualifier",
+  "version": "1.1.0",
+  "description": "Internal Ternary House tool: recent long-form Avg Views and Engagement evidence for a YouTube creator, calculated from official YouTube Data API v3 statistics.",
+  "minimum_chrome_version": "102",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://www.googleapis.com/youtube/v3/*"
+  ],
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.youtube.com/*"
+      ],
+      "js": [
+        "content/render.js",
+        "content/url-export.js",
+        "content/content.js"
+      ],
+      "css": [
+        "content/content.css"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": true
+  },
+  "action": {
+    "default_title": "Ternary House YouTube Qualifier \u2014 settings",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
