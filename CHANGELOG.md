@@ -60,6 +60,20 @@ Everything in `lib/`, `background/`, `options/`, `content/render.js`,
 `TARGET_CANDIDATES` (30), `checkLatestOrdering()`, `readSortChips()`, the
 `ANALYZE` request, permissions, key handling and storage isolation.
 
+### Fixed after live acceptance finding #2 (2026-10-10)
+
+- **Channel description recorded twice** for `@TvMisericordiaPL`. The reader
+  concatenated every text node in the header's description preview, so a
+  second rendering of the one description string in a separate element came
+  out as a glued duplicate. When the preview holds two or more separate
+  `role="text"` strings that are identical in full, the description is now
+  read once and `capture_limitations` says so. Repetition written inside the
+  description is kept; every other shape reads as before; extent, source and
+  the JSON schema are unchanged. The live markup was not captured, so this is
+  the reader-side cause the symptom fits, not a confirmed one.
+- Tests 232 -> **237** (5 description regressions); harness 48 -> 51 checks.
+  Build label `version_name: 1.2.0-candidate.3`.
+
 ### Fixed after the first live acceptance test (2026-10-10)
 
 - **Published cards showing an abbreviated age were refused** (`Review video

@@ -133,6 +133,42 @@ Both exporters, the selector's rules for scheduled/live cards, the general
 export, and everything outside `video-selection.js` and the one JSON field are
 unchanged.
 
+## 3b. Live acceptance finding #2 (2026-10-10) and fix
+
+**Observed by the founder on real YouTube:** for `@TvMisericordiaPL`, Copy
+Channel Details produced a `description_text` in which the same complete
+paragraph appeared twice, consecutively.
+
+**What could be established (from code and tests, not from the live page):**
+
+- The header preview carries **one** description string (YouTube's data model
+  has a single description field — third-party source: the YouTube.js
+  `DescriptionPreviewView` parser docs; not independently verified).
+- The reader cannot double a single copy: it visits each text node once
+  (tested). It read **every** text node in `yt-description-preview-view-model`,
+  so if the page held that string **twice in separate elements** (for example
+  a hidden measuring copy, or an accessibility copy inside the "...more"
+  control) both were concatenated — with **no** space or line break between
+  them, e.g. `…Świętej.Telewizja…`.
+- Repetition the creator wrote is inside the one string and keeps the creator's
+  own line break or space.
+
+The live preview markup was not captured and youtube.com is unreachable from
+the build environment, so **which of the two applies to @TvMisericordiaPL is
+not confirmed**. The glued join is the tell: if the founder's earlier JSON shows
+the second copy starting right after the first copy's last character, the
+reader introduced it.
+
+**Fix (`content/channel-details.js`, description reader only):** when the
+preview contains two or more separate `role="text"` strings (YouTube's
+displayed-text elements) that are **identical in full**, the description is
+read once, and `capture_limitations` states how many identical copies the
+preview held. Repetition inside one string is never touched; any other shape
+(one string, or different strings) is read exactly as before.
+`description_extent` stays `PARTIAL` and `description_source` stays
+`CHANNEL_HEADER_PREVIEW` — still a header preview. The JSON schema is
+unchanged.
+
 **Order check.** Latest must read newest → oldest. If a card's displayed age is
 clearly younger than one above it (a pinned or reordered card), both Latest
 exports refuse with `Review video order` rather than claim DOM order is
@@ -261,8 +297,8 @@ The manifest adds two content-script files and the version `1.2.0` /
 | `clipboard.test.mjs` | 20 (unchanged) |
 | `url-export.test.mjs` | 44 (loader + fixture shape updated; no assertion changed) |
 | `video-selection.test.mjs` (new) | 63 (54 + 9 real-pattern regressions) |
-| `channel-details.test.mjs` (new) | 30 (29 + 1 real-pattern cross-check) |
-| **Total** | **232** |
+| `channel-details.test.mjs` (new) | 35 (29 + 1 real-pattern cross-check + 5 description regressions) |
+| **Total** | **237** |
 
 Changes to the pre-existing `url-export.test.mjs`, all required by the new
 fail-closed rule and none changing an assertion: the loader also evaluates
@@ -282,8 +318,10 @@ caught; the survivor is equivalent (a second guard in the same function
 refuses it). Six of the new real-pattern tests fail on the pre-fix code.
 
 **Real Chromium, real extension, SIMULATED pages**
-(`node tests/browser/extension-harness.mjs`, optional, needs Playwright): 48
-checks passing — the real-pattern page from section 3a (both Latest exports
+(`node tests/browser/extension-harness.mjs`, optional, needs Playwright): 51
+checks passing — a description preview with a simulated second rendering
+(section 3b) recorded once, the header reader identical in the test DOM and
+Chromium, the real-pattern page from section 3a (both Latest exports
 copy and agree, Premieres at 3–5 omitted, general export keeps all 15), bar
 order and single mount, both Latest exports agreeing
 position by position with two scheduled Premieres at the top, JSON fields,
@@ -353,6 +391,13 @@ installed v1.1.0 is untouched.
 - **Virtualization** of very long grids is unmeasured (section 9.6).
 - **About panel not opened**: country, joined date, lifetime views and the
   full description are never captured.
+- **Description duplication (finding #2) — cause unconfirmed.** The fix covers
+  a second rendering held in a separate `role="text"` element. If the live
+  copy sits in an element without `role="text"`, the duplicate would persist
+  (visible in the retest). If YouTube ever rendered one authored description as
+  several elements, one per paragraph, a description consisting only of the
+  same paragraph repeated would be recorded once; the `capture_limitations`
+  note makes that visible.
 - **Evidence Maker compatibility**: the current Evidence Maker (v1.3) expects
   screenshot provenance. A new Evidence Maker spec that accepts
   `browser_dom_capture` / `D1` must be written and validated before Ohi uses
@@ -366,7 +411,8 @@ installed v1.1.0 is untouched.
 
 Do not replace the installed v1.1.0. In a separate Chrome profile: open
 `chrome://extensions`, enable Developer mode, **Load unpacked**, choose this
-folder. It shows as **1.2.0-candidate.2** (the build with the section 3a
-fix; `1.2.0-candidate` is the first build). If it still shows
-`1.2.0-candidate`, click the extension's reload icon and hard-refresh YouTube. Add an API key in that profile only if
+folder. It shows as **1.2.0-candidate.3** (the build with the section 3a
+and 3b fixes; `.2` had only 3a, `1.2.0-candidate` is the first build). If it
+shows an earlier label, click the extension's reload icon and hard-refresh
+YouTube. Add an API key in that profile only if
 testing the metrics.

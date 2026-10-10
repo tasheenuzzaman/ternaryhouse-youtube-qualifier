@@ -79,7 +79,8 @@ const CHANNELS = {
   // Real Oct-2026 card patterns (founder's DevTools excerpts); shell reconstructed.
   '@TvMisericordiaPL': {
     name: 'TV Misericordia',
-    header: () => modernHeader({ name: 'TV Misericordia', handle: '@TvMisericordiaPL', subscribers: '120K subscribers', videoCount: '4K videos', description: 'Telewizja katolicka.' }),
+    // descriptionCopy: SIMULATED second rendering of the description (live finding #2).
+    header: () => modernHeader({ name: 'TV Misericordia', handle: '@TvMisericordiaPL', subscribers: '120K subscribers', videoCount: '4K videos', description: 'Telewizja katolicka.\nTransmisje Mszy Świętej.', descriptionCopy: 'measure' }),
     cards: tvMisericordiaShape().map(({ id, html }) => ({ id, html })),
     initial: 15,
   },
@@ -265,7 +266,7 @@ try {
       && json.channel_more_info.video_count_text === '312 videos');
     check('details: Unicode/quotes title intact', json.sample.videos[0].title === 'Video 1000 — “quotes” & ভিডিও', json.sample.videos[0].title);
     check('details: scheduled listed only as excluded', json.sample.excluded_not_in_sample.map((x) => x.video_id).join(',') === `${vid(911)},${vid(912)}`);
-    check('details: tool version is the candidate build', json.source.tool_version === '1.2.0-candidate.2', json.source.tool_version);
+    check('details: tool version is the candidate build', json.source.tool_version === '1.2.0-candidate.3', json.source.tool_version);
     check('details: captured_at has a timezone offset', /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d$/.test(json.captured_at), json.captured_at);
   }
 
@@ -336,6 +337,11 @@ try {
     realJson.sample.videos.map((v, i) => `${i + 1}. ${v.video_url}`).join('\n') === realBlock);
   check('real patterns: age from the accessible label, source recorded',
     realJson.sample.videos[0].published_text === '2 hours ago' && realJson.sample.videos[0].published_text_source === 'ACCESSIBLE_LABEL');
+  check('description: a second rendering in the page is recorded once, line break kept',
+    realJson.channel.description_text === 'Telewizja katolicka.\nTransmisje Mszy Świętej.', JSON.stringify(realJson.channel.description_text));
+  check('description: extent/source unchanged and the collapse disclosed',
+    realJson.channel.description_extent === 'PARTIAL' && realJson.channel.description_source === 'CHANNEL_HEADER_PREVIEW'
+    && realJson.capture_limitations.some((n) => /held 2 identical copies/.test(n)));
   check('real patterns: Premiere evidence keeps U+202F', realJson.sample.excluded_not_in_sample[0].status_text === 'Premieres 10/11/26, 1:00\u202FAM');
   const ra = await clickExport(2, DONE);
   const realAll = (await clip()).split('\n');
@@ -398,6 +404,26 @@ try {
   }, { src: readFileSync(join(EXT, 'content', 'video-selection.js'), 'utf8'), html: gridHtml });
   check('card reader output identical in mini-DOM and Chromium', nodeSide === browserSide,
     nodeSide === browserSide ? `${JSON.parse(nodeSide).length} cards` : `node=${nodeSide.slice(0, 200)} browser=${browserSide.slice(0, 200)}`);
+
+  const headerVariants = [
+    { name: 'A', handle: '@aaa_channel', description: 'P1.\nP2.' },
+    { name: 'B', handle: '@bbb_channel', description: 'Same.\nSame.' },
+    { name: 'C', handle: '@ccc_channel', description: 'Copy.\nTwo.', descriptionCopy: 'measure' },
+    { name: 'D', handle: '@ddd_channel', description: 'Copy.', descriptionCopy: 'inMore' },
+  ];
+  const cdSrc = ['video-selection.js', 'url-export.js', 'channel-details.js'].map((f) => readFileSync(join(EXT, 'content', f), 'utf8'));
+  const nodeHeaders = JSON.stringify(headerVariants.map((v) => loadContentScripts().CD.readChannelHeader(parseHTML(modernHeader(v)).children[0])));
+  const browserHeaders = await page.evaluate(({ srcs, htmls }) => {
+    const s = {};
+    for (const src of srcs) new Function('self', src)(s); // eslint-disable-line no-new-func
+    return JSON.stringify(htmls.map((html) => {
+      const holder = document.createElement('div');
+      holder.innerHTML = html;
+      return s.THQChannelDetails.readChannelHeader(holder.firstElementChild);
+    }));
+  }, { srcs: cdSrc, htmls: headerVariants.map((v) => modernHeader(v)) });
+  check('header reader output identical in mini-DOM and Chromium (incl. description copies)', nodeHeaders === browserHeaders,
+    nodeHeaders === browserHeaders ? `${headerVariants.length} headers` : `node=${nodeHeaders.slice(0, 160)} browser=${browserHeaders.slice(0, 160)}`);
 
   console.log('\nLAYOUT (fixture page, not YouTube CSS)');
   await page.goto('https://www.youtube.com/@FixtureTax/videos');

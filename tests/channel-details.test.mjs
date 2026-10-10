@@ -107,6 +107,64 @@ test('H6. findChannelHeader finds the modern header on a full page', () => {
 
 /* =================================================================== */
 
+group('DESCRIPTION PREVIEW (live acceptance finding #2)');
+
+/*
+ * Live finding #2 (@TvMisericordiaPL): description_text held the same complete
+ * paragraph twice. The data model carries one description string; the reader
+ * concatenated every text node in the preview, so a second rendering of that
+ * string in the page came out as a glued duplicate. The real preview markup
+ * was not captured: the two second-rendering shapes below are SIMULATED.
+ */
+
+const PL = 'Telewizja Misericordia — transmisje Mszy Świętej i modlitwy „Różańca”.';
+const descOf = (opts) => CD.readChannelHeader(headerNode({ ...HEADER, ...opts }));
+
+test('H7. a second rendering of the description (hidden measuring copy) is read once', () => {
+  const h = descOf({ description: PL, descriptionCopy: 'measure' });
+  equal(h.descriptionText, PL, 'one copy, exactly as written');
+  equal(h.descriptionRenderings, 2, 'two renderings were present');
+});
+
+test('H8. a copy inside the "...more" control is read once', () => {
+  const h = descOf({ description: `${PL}\nDruga linia.`, descriptionCopy: 'inMore' });
+  equal(h.descriptionText, `${PL}\nDruga linia.`, 'one copy, line break kept');
+  equal(h.descriptionRenderings, 2, 'two renderings were present');
+});
+
+test('H9. repetition the creator wrote INSIDE the description is preserved exactly', () => {
+  for (const authored of [`${PL}\n${PL}`, `${PL}\n\n${PL}`, `${PL} ${PL}`, `${PL}\nInny akapit.\n${PL}`]) {
+    const h = descOf({ description: authored });
+    equal(h.descriptionText, authored, `kept as written: ${JSON.stringify(authored.slice(-20))}`);
+    equal(h.descriptionRenderings, 1, 'one rendering');
+  }
+  const both = descOf({ description: `${PL}\n${PL}`, descriptionCopy: 'measure' });
+  equal(both.descriptionText, `${PL}\n${PL}`, 'authored repetition kept even when a second rendering is also present');
+});
+
+test('H10. only IDENTICAL complete copies count as renderings; anything else reads as before', () => {
+  const node = headerNode({ ...HEADER, description: PL });
+  const preview = node.querySelector('yt-description-preview-view-model truncated-text');
+  preview.appendChild(fragment(`<div><span role="text">${PL} (inny)</span></div>`));
+  const h = CD.readChannelHeader(node);
+  equal(h.descriptionText, `${PL}${PL} (inny)`, 'different strings: unchanged whole-preview reading');
+  equal(h.descriptionRenderings, 1, 'not treated as renderings');
+  const three = headerNode({ ...HEADER, description: PL, descriptionCopy: 'measure' });
+  three.querySelector('truncated-text').appendChild(fragment(`<div aria-hidden="true"><span role="text">${PL}</span></div>`));
+  equal(CD.readChannelHeader(three).descriptionRenderings, 3, 'three renderings counted, text once');
+});
+
+test('H11. JSON: description once, provenance honest, extent and source unchanged', () => {
+  const identity = identityFor({ header: { ...HEADER, description: PL, descriptionCopy: 'measure' } });
+  const { json } = evidenceFor(publishedRun(980, 12), identity);
+  equal(json.channel.description_text, PL, 'description_text');
+  equal(json.channel.description_extent, 'PARTIAL', 'still a header preview, completeness not claimed');
+  equal(json.channel.description_source, 'CHANNEL_HEADER_PREVIEW', 'source unchanged');
+  assert(json.capture_limitations.some((n) => /held 2 identical copies/.test(n) && /kept as written/.test(n)), 'the collapse is disclosed');
+  const plain = evidenceFor(publishedRun(990, 12)).json;
+  assert(!plain.capture_limitations.some((n) => /identical copies/.test(n)), 'no note when there was one rendering');
+});
+
 group('CHANNEL IDENTITY');
 
 test('I1. handle URL: page handle preserved, clean channel URL', () => {

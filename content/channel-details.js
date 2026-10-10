@@ -104,11 +104,11 @@
   }
 
   /**
-   * Description text as displayed, with line breaks kept. The "...more"
+   * Text of a subtree as displayed, with line breaks kept. The "...more"
    * expander is not part of it. (The preview itself may sit inside a
    * clickable element, so buttons in general are NOT skipped.)
    */
-  function descriptionText(node) {
+  function displayedText(node) {
     let text = '';
     (function walk(n) {
       for (const child of n.childNodes || []) {
@@ -127,12 +127,54 @@
   }
 
   /**
+   * The outermost displayed text strings in a subtree. YouTube renders text
+   * as attributed strings carrying role="text"; hidden nodes and the "...more"
+   * expander are skipped.
+   */
+  function textStrings(node) {
+    const hosts = [];
+    (function walk(n) {
+      for (const child of n.childNodes || []) {
+        if (child.nodeType !== 1) continue;
+        if (isHidden(child) || SKIP_TAGS.has(tagOf(child))) continue;
+        if (MORE_CONTROL_RE.test(visibleText(child))) continue;
+        if (attr(child, 'role') === 'text') hosts.push(child);
+        else walk(child);
+      }
+    }(node));
+    return hosts;
+  }
+
+  /**
+   * The description preview's text, with line breaks kept.
+   *
+   * The preview carries ONE description string. If the page holds that same
+   * complete string more than once, in separate elements (a second rendering
+   * such as a measuring or accessibility copy), reading every text node would
+   * glue the copies together, so it is read once and `renderings` reports how
+   * many copies were present. Repetition the creator wrote INSIDE the string
+   * is part of one element and is never touched; any other shape is read
+   * exactly as before.
+   */
+  function readDescription(node) {
+    const strings = textStrings(node).map(displayedText).filter(Boolean);
+    const keys = strings.map(norm);
+    if (strings.length > 1 && keys.every((k) => k === keys[0])) {
+      return { text: strings[0], renderings: strings.length };
+    }
+    const text = displayedText(node);
+    return { text, renderings: text ? 1 : 0 };
+  }
+
+  /**
    * What the channel header shows. Every field is null when not found.
    * Country, joined date and lifetime views live in YouTube's About panel,
    * which is never opened, so they are not read here.
    */
   function readChannelHeader(root) {
-    const empty = { found: false, name: null, handle: null, subscriberCountText: null, videoCountText: null, descriptionText: null };
+    const empty = {
+      found: false, name: null, handle: null, subscriberCountText: null, videoCountText: null, descriptionText: null, descriptionRenderings: 0,
+    };
     if (!root || typeof root.querySelector !== 'function') return empty;
 
     const h1 = root.querySelector('h1');
@@ -142,7 +184,7 @@
 
     const description = root.querySelector(DESCRIPTION_SELECTOR);
     const parts = headerParts(root, [h1, legacyName, description].filter(Boolean));
-    const descText = description ? descriptionText(description) : '';
+    const desc = description ? readDescription(description) : { text: '', renderings: 0 };
 
     return {
       found: true,
@@ -150,7 +192,8 @@
       handle: parts.find((p) => HANDLE_RE.test(p)) || null,
       subscriberCountText: parts.find((p) => SUBSCRIBERS_RE.test(p)) || null,
       videoCountText: parts.find((p) => VIDEO_COUNT_RE.test(p)) || null,
-      descriptionText: descText || null,
+      descriptionText: desc.text || null,
+      descriptionRenderings: desc.renderings,
     };
   }
 
@@ -217,9 +260,14 @@
     if (!url) problems.push('CHANNEL_URL_UNAVAILABLE');
 
     const description = h.descriptionText || null;
+    const notes = [];
+    if (description && h.descriptionRenderings > 1) {
+      notes.push(`description_text: the channel header preview held ${h.descriptionRenderings} identical copies of the description in separate page elements; it is recorded once. Repetition within the description text itself is kept as written.`);
+    }
     return {
       ok: problems.length === 0,
       problems,
+      notes,
       channel: {
         channel_name: name,
         channel_name_source: nameSource,
@@ -267,6 +315,7 @@
     } else if (!c.channel_handle) {
       notes.push('channel_handle is null: no handle is shown in the page header and the page URL is not a handle URL.');
     }
+    notes.push(...(identity.notes || []));
     notes.push(c.description_text
       ? 'description_text is the channel header preview and may be truncated; the full About description was not opened.'
       : 'description_text is null: no description preview was found in the channel header.');

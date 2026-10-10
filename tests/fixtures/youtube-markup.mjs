@@ -205,15 +205,22 @@ export function grid(cardsHtml) {
 /**
  * The modern channel header.
  * opts: name, handle (with @), subscribers, videoCount, description (may
- *       contain \n), descriptionInButton (default true), extraRows[]
+ *       contain \n), descriptionInButton (default true), extraRows[],
+ *       descriptionCopy: 'measure' | 'inMore' — SIMULATES the page holding a
+ *       second rendering of the same description string (a hidden measuring
+ *       copy, or an accessibility copy inside the "...more" control). The real
+ *       structure behind live finding #2 has not been captured.
  */
 export function modernHeader(o) {
   const descLines = o.description == null ? null : String(o.description).split('\n').map(esc).join('<br>');
+  const copy = descLines === null ? '' : `<span class="yt-core-attributed-string" role="text">${descLines}</span>`;
+  const measure = o.descriptionCopy === 'measure' ? `<div class="ytTruncatedTextMeasure" aria-hidden="true">${copy}</div>` : '';
+  const moreLabel = o.descriptionCopy === 'inMore' ? `<span aria-hidden="true">${copy}</span><span>...more</span>` : '...more';
   const descInner = descLines === null ? '' : `
           <yt-description-preview-view-model class="ytPageHeaderViewModelDescription">
             <truncated-text class="ytTruncatedTextHost">${o.descriptionInButton === false
     ? `<span class="yt-core-attributed-string" role="text">${descLines}</span>`
-    : `<button class="ytTruncatedTextTruncatedTextContent" aria-label="Description. tap for more"><span class="yt-core-attributed-string" role="text">${descLines}</span></button>`}<button class="ytTruncatedTextAbsoluteButton" aria-label="tap for more">...more</button></truncated-text>
+    : `<button class="ytTruncatedTextTruncatedTextContent" aria-label="Description. tap for more"><span class="yt-core-attributed-string" role="text">${descLines}</span></button>`}${measure}<button class="ytTruncatedTextAbsoluteButton" aria-label="tap for more">${moreLabel}</button></truncated-text>
           </yt-description-preview-view-model>`;
   const counts = [o.subscribers, o.videoCount].filter(Boolean)
     .map((t, i) => `${i ? '<span class="ytContentMetadataViewModelDelimiter" aria-hidden="true"> • </span>' : ''}<span class="yt-core-attributed-string" role="text">${esc(t)}</span>`).join('');
