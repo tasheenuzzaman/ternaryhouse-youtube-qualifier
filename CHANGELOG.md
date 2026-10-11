@@ -5,9 +5,18 @@ All notable changes to Ternary House YouTube Qualifier.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 This is an internal tool; versions are not published to the Chrome Web Store.
 
-**Current stable: 1.1.0.** 1.2.0 is a CANDIDATE under acceptance testing (not
-authorized for production). 1.0.0, 1.0.1 and 1.0.2 remain frozen and archived
-as historical releases.
+**Current stable: 1.2.0.** 1.1.0, 1.0.0, 1.0.1 and 1.0.2 remain frozen and
+archived as historical releases.
+
+---
+
+## [1.2.0] — 2026-10-11 — STABLE — FOUNDER APPROVED
+
+Released by explicit founder decision from the tested `1.2.0-candidate.3`
+runtime (`dece8f0`). Only change: `version_name` removed from the manifest
+(version `1.2.0`). No functional change. Live checks not performed at release
+are recorded as **UNVERIFIED — FOUNDER-WAIVED** (RELEASE_NOTES_v1.2.0.md §9);
+the founder accepted the residual risk. Candidate history below.
 
 ---
 

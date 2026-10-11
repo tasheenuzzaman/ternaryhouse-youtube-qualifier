@@ -269,7 +269,7 @@ try {
       && json.channel_more_info.video_count_text === '312 videos');
     check('details: Unicode/quotes title intact', json.sample.videos[0].title === 'Video 1000 — “quotes” & ভিডিও', json.sample.videos[0].title);
     check('details: scheduled listed only as excluded', json.sample.excluded_not_in_sample.map((x) => x.video_id).join(',') === `${vid(911)},${vid(912)}`);
-    check('details: tool version is the candidate build', json.source.tool_version === '1.2.0-candidate.3', json.source.tool_version);
+    check('details: tool version is the candidate build', json.source.tool_version === '1.2.0', json.source.tool_version);
     check('details: captured_at has a timezone offset', /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d$/.test(json.captured_at), json.captured_at);
   }
 

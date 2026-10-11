@@ -6,13 +6,13 @@ recent **Avg Views** and recent **Engagement** evidence.
 
 Open a channel's Videos tab, click one control, copy, move on.
 
-**Version 1.2.0 — CANDIDATE, under acceptance testing; NOT authorized for
-production.** Adds **Copy Channel Details** (section 14b) and **Copy all video
-URLs** (section 14c), and stops **Copy 12 URLs** from exporting scheduled
-Premieres (section 14a). Avg Views and Engagement are unchanged. Not yet
-validated on live YouTube — see [RELEASE_NOTES_v1.2.0.md](RELEASE_NOTES_v1.2.0.md).
-**v1.1.0 remains the stable release** ([RELEASE_NOTES_v1.1.0.md](RELEASE_NOTES_v1.1.0.md));
-1.0.0, 1.0.1 and 1.0.2 remain archived. Full history in
+**Version 1.2.0 — STABLE, FOUNDER APPROVED (2026-10-11).** Adds **Copy
+Channel Details** (section 14b) and **Copy all video URLs** (section 14c), and
+stops **Copy 12 URLs** from exporting scheduled Premieres (section 14a). Avg
+Views and Engagement are unchanged. Live validation was partial; the remaining
+checks were waived by the founder — see [RELEASE_NOTES_v1.2.0.md](RELEASE_NOTES_v1.2.0.md).
+1.1.0 ([RELEASE_NOTES_v1.1.0.md](RELEASE_NOTES_v1.1.0.md)), 1.0.0, 1.0.1 and
+1.0.2 remain archived. Full history in
 [CHANGELOG.md](CHANGELOG.md).
 
 ---
