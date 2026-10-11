@@ -758,6 +758,7 @@ docs/v1.2.0-candidate-examples Clipboard examples generated from simulated pages
 tests/manual-fixtures.html     DEVELOPER-ONLY page for eyeballing rare states.
                                Delete it and manual-fixtures.js to remove.
 tools/make-icons.py            Dev utility to regenerate the icons
+tools/package-release.mjs      Dev utility: release ZIP + SHA-256 from a commit
 ```
 
 `lib/calculations.js` is pure: no DOM, no network, no `chrome.*`. That is what

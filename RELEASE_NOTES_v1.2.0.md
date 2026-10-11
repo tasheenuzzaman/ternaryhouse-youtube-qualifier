@@ -7,12 +7,13 @@ Gemini classifiers and Ohi's runbook are unchanged.
 
 **Specification:** `TERNARY_HOUSE_YOUTUBE_QUALIFIER_CHANNEL_DETAILS_AND_ALL_URLS_IMPLEMENTATION_BRIEF_v1.2.md`
 
-**Live-validation status: NOT YET VALIDATED ON LIVE YOUTUBE.** The build
-environment cannot reach youtube.com; automated DOM checks run on simulated
-markup, now including patterns copied from real pages (section 3a). The first
-founder live test found a defect, fixed in section 3a; it must be retested
-live. Section 9 lists the live checks that must pass before production
-authorization.
+**Live-validation status: PARTIALLY VALIDATED ON LIVE YOUTUBE (release audit
+2026-10-11).** Founder live tests on `@TvMisericordiaPL` confirmed the
+scheduled-Premiere exclusion, the 12-video selection and the description fix
+on build `1.2.0-candidate.3` (commit `dece8f0`). Several checks the brief
+requires before production are still outstanding — see the status table in
+section 9. The build environment cannot reach youtube.com; its own DOM checks
+run on simulated markup.
 
 ---
 
@@ -152,6 +153,13 @@ paragraph appeared twice, consecutively.
   them, e.g. `…Świętej.Telewizja…`.
 - Repetition the creator wrote is inside the one string and keeps the creator's
   own line break or space.
+
+**Cause confirmed live (founder, 2026-10-10, `1.2.0-candidate.3`):** the
+export recorded the paragraph once, `capture_limitations` reported that the
+preview "held 2 identical copies of the description in separate page
+elements", and YouTube's full description panel shows the paragraph once. So
+the page rendered the one description twice and the reader had concatenated
+the copies. (Text below written before that retest.)
 
 The live preview markup was not captured and youtube.com is unreachable from
 the build environment, so **which of the two applies to @TvMisericordiaPL is
@@ -332,44 +340,30 @@ output in the test DOM and Chromium, bar wrapping at 1280/800/420 px without
 overlapping the sort chips (fixture CSS, not YouTube's), missing-API-key
 metrics message, and no request outside the fixture origin.
 
-## 9. Required live checks before production (not yet done)
+## 9. Live acceptance status (release audit, 2026-10-11)
 
-Use a **separate Chrome profile** with the candidate loaded unpacked, so the
-installed v1.1.0 is untouched.
+Gates from the brief (§6 test plan, §8 acceptance test) against the evidence
+on record. "Live" = founder-reported on real YouTube; nothing here was
+observed live by the build environment.
 
-1. **FinTaxPro** `youtube.com/@FinTaxPro/videos` while its Premieres are still
-   upcoming: Copy 12 URLs skips them (toast says so); Copy Channel Details lists
-   them only under `excluded_not_in_sample`; IDs 1–12 identical in both; Copy
-   all video URLs includes them. If the Premieres have already happened, record
-   that and do not count this check as passed.
-2. A channel with **completed Premieres** (e.g. `@TorinHofmann`): no
-   `Review video status`, Premieres included.
-3. An **ordinary channel**: both Latest exports succeed; titles, ages and
-   durations in the JSON match the cards.
-4. A channel that is **live right now** with the stream on the Videos tab, if
-   one can be found: it is skipped.
-5. **Popular/Oldest:** Latest exports show `Switch to Latest`, clipboard
-   unchanged; Copy all video URLs works and its `Sort:` line is right.
-6. **Deep scroll / virtualization:** on Paul J. Lipsky (or any channel with
-   1,000+ videos) scroll several years deep, click Copy all video URLs, and
-   check that `Total URLs` matches the number of cards from the top to where
-   you stopped and that the first URL is still the newest video. If the
-   earliest videos are missing, YouTube is discarding cards — report it; do
-   not use the export as complete history.
-7. **Header:** channel name, handle (capitalisation), subscriber/video counts
-   and description preview in the JSON match the page; a `/channel/UC…`
-   channel without a handle gives `channel_handle: null`.
-8. **SPA:** creator A → creator B without reload: one bar; B's data only.
-9. **Narrow window:** bar wraps, sort chips and channel header stay usable.
-10. **Missing API key** (fresh profile): all three exports work; Avg Views
-    shows the key message.
-11. **UI language:** confirm the operator's YouTube UI is English. In any other
-    language the two Latest exports will show `Review video status`.
-12. **Metrics unchanged:** Avg Views / Engagement on Futurepedia and Torin match
-    v1.1.0's values.
-13. **Timing:** time one Copy Channel Details capture versus the current
-    screenshot + separate-URL routine, and separately the time until Evidence
-    Maker returns a usable validated packet.
+| # | Check | Status | Evidence on record |
+| --- | --- | --- | --- |
+| 1 | Scheduled Premieres skipped; 12 published selected on a real page | **PASS (live)** | `candidate.3`, `@TvMisericordiaPL`, 2026-10-10: grid 1, 6–16 selected; Premieres at 2–5 excluded. FinTaxPro itself was not tested (its Premieres were due 11–12 Oct); this is the same live condition. |
+| 2 | Copy 12 URLs and Copy Channel Details identical, position by position, same page | **OUTSTANDING** | Required by the acceptance test. The first build failed this page (finding #1); no Copy 12 URLs result reported on a fixed build. |
+| 3 | Screenshot-free single block; description against YouTube's full description | **PASS (live)** | `candidate.3`: one copy, matches the full description; provenance fields correct (section 3b). |
+| 4 | Channel with completed Premieres (e.g. `@TorinHofmann`) | **OUTSTANDING** | Required by the brief. |
+| 5 | Ordinary channel: titles, ages, runtimes match the cards | **OUTSTANDING** | Required by the brief. |
+| 6 | Popular / Oldest: Latest exports refuse, clipboard unchanged; general export `Sort:` line | **OUTSTANDING** | Required by the brief. |
+| 7 | Copy all video URLs on Latest | **PASS (live)** | First build: 30 URLs in Latest order. That code is byte-identical in `candidate.3`. |
+| 8 | Copy all video URLs several years deep (virtualization) | **OUTSTANDING** | Required by the acceptance test (§5A). |
+| 9 | Header: name, handle capitalisation, counts | PARTIAL | Description and provenance confirmed; name/handle/counts not explicitly reported. |
+| 10 | Creator → creator without reload: one bar, new creator's data only | **OUTSTANDING** | Required by the brief. |
+| 11 | Missing API key: exports work; Avg Views shows the key message | **OUTSTANDING** | Required by the brief. |
+| 12 | Avg Views / Engagement unchanged from v1.1.0 | PARTIAL | Metric code byte-identical to v1.1.0 (diff). Live values produced (859 / 16.01%) but not compared with v1.1.0 on the same channel. |
+| 13 | Narrow window: bar wraps, chips and header usable | Recommended | Simulated only (harness, fixture CSS). |
+| 14 | Operator YouTube UI is English | Confirm per machine | Live strings seen were English. |
+| 15 | Timing: capture vs screenshots; time to a validated CEP | Measurement outstanding | Brief §6 performance verification. |
+| 16 | Evidence Maker consumes the block correctly | **OUTSTANDING — founder decision** | Brief §8: "Release remains pending until … the revised Evidence Maker consumes the details evidence correctly." Whether this gates the *extension* release, or only Ohi's switch to the screenshot-free workflow, is the founder's call. |
 
 ## 10. Known limitations and open risks
 
@@ -382,22 +376,21 @@ installed v1.1.0 is untouched.
   visibly. If a live card shows *only* a stale upcoming signal and no age,
   it would be skipped; the toast and `excluded_not_in_sample` make that
   auditable.
-- **Abbreviated ages beyond hours are unverified.** Only `2h ago` labelled
-  `2 hours ago` has been seen live. Days, weeks, months and years are expected
-  to follow the same label pattern; if one does not, that card fails closed
-  with `CARD_AGE_UNRECOGNIZED` and its text in the tooltip.
+- **Abbreviated ages: partly verified.** `2h ago` labelled `2 hours ago` was
+  seen live. The `candidate.3` live capture selected 12 videos (grid 1, 6–16)
+  with no refusal, so every age on those cards was read; which units they
+  showed was not recorded. A card whose age cannot be read fails closed with
+  `CARD_AGE_UNRECOGNIZED` and its text in the tooltip.
 - **Members-only videos** are treated like any published video; whether they
   should be excluded as "inaccessible" is an open policy question.
 - **Virtualization** of very long grids is unmeasured (section 9.6).
 - **About panel not opened**: country, joined date, lifetime views and the
   full description are never captured.
-- **Description duplication (finding #2) — cause unconfirmed.** The fix covers
-  a second rendering held in a separate `role="text"` element. If the live
-  copy sits in an element without `role="text"`, the duplicate would persist
-  (visible in the retest). If YouTube ever rendered one authored description as
-  several elements, one per paragraph, a description consisting only of the
-  same paragraph repeated would be recorded once; the `capture_limitations`
-  note makes that visible.
+- **Description duplication (finding #2) — fixed and confirmed live** on
+  `@TvMisericordiaPL`. Residual edge: if YouTube ever rendered one authored
+  description as several elements, one per paragraph, a description consisting
+  only of the same paragraph repeated would be recorded once; the
+  `capture_limitations` note makes that visible.
 - **Evidence Maker compatibility**: the current Evidence Maker (v1.3) expects
   screenshot provenance. A new Evidence Maker spec that accepts
   `browser_dom_capture` / `D1` must be written and validated before Ohi uses
@@ -416,3 +409,31 @@ and 3b fixes; `.2` had only 3a, `1.2.0-candidate` is the first build). If it
 shows an earlier label, click the extension's reload icon and hard-refresh
 YouTube. Add an API key in that profile only if
 testing the metrics.
+
+## 12. Release procedure (after founder approval — not yet performed)
+
+1. All required checks in section 9 PASS, and the founder decides item 16.
+2. One commit on `feature/v1.2.0`: remove `version_name` from the manifest
+   (Chrome then shows `1.2.0`; `tool_version` becomes `1.2.0`), set the README,
+   CHANGELOG and these notes to STABLE, and update the harness's expected
+   `tool_version`. No runtime code change: the object IDs of `background`,
+   `content`, `lib`, `options` and `icons` must equal those of the tested
+   commit `dece8f0`:
+
+   ```
+   adfb7a64f8a8042031470609662d981735f74c30  background
+   0094583a76c2249f89e819ec42f2b320d5c5b01c  content
+   16bd8aee50cb739d76b771d1873a27c971a40c3e  lib
+   551d21ad096fd80a1c04331adf084097823dfcb6  options
+   fcb299544079c3d9460eb1e987acc5c030610231  icons
+   ```
+
+3. `npm test`, the Chromium harness on the unpacked package, then
+   `node tools/package-release.mjs` → `ternaryhouse-youtube-qualifier-v1.2.0-stable.zip`
+   plus its SHA-256.
+4. Merge to `main` and tag `v1.2.0`: by or with explicit approval of the
+   founder only.
+5. Install per the founder-approved steps (in-place folder replacement keeps
+   the extension ID and saved API key; keep the v1.1.0 ZIP and folder for
+   rollback).
+

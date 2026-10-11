@@ -13,6 +13,7 @@
  * Not part of `npm test` (it needs Playwright and a Chromium build):
  *
  *   node tests/browser/extension-harness.mjs
+ *   THQ_EXT_DIR=/path/to/unpacked-release node tests/browser/extension-harness.mjs
  *
  * Requires the `playwright` package resolvable from Node (global install is
  * fine) and a Chromium that supports extensions in headless mode.
@@ -21,7 +22,7 @@
 import { createRequire } from 'node:module';
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseHTML } from '../helpers/mini-dom.mjs';
 import { loadContentScripts } from '../helpers/load-content.mjs';
@@ -39,7 +40,9 @@ try {
   process.exit(2);
 }
 
-const EXT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+// THQ_EXT_DIR: test another extension folder (e.g. an unpacked release ZIP)
+// instead of this checkout.
+const EXT = process.env.THQ_EXT_DIR ? resolve(process.env.THQ_EXT_DIR) : join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const vid = (n) => `V${String(n).padStart(10, '0')}`;
 const wurl = (id) => `https://www.youtube.com/watch?v=${id}`;
 

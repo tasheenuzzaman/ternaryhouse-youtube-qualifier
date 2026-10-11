@@ -60,6 +60,22 @@ Everything in `lib/`, `background/`, `options/`, `content/render.js`,
 `TARGET_CANDIDATES` (30), `checkLatestOrdering()`, `readSortChips()`, the
 `ANALYZE` request, permissions, key handling and storage isolation.
 
+### Release-readiness audit (2026-10-11) — not yet released
+
+- No runtime change: the tested build `1.2.0-candidate.3` (`dece8f0`) is
+  unchanged. 237 tests pass (UTC, Asia/Dhaka, America/Los_Angeles); mutation
+  check 28/29 (the survivor is equivalent); the Chromium harness passes 51/51
+  on the repository and on the unpacked release ZIP (simulated pages).
+- Permissions unchanged from v1.1.0; no new network, storage, `eval` or HTML
+  injection in the new code; only new `chrome.*` call is
+  `runtime.getManifest()`.
+- Finding #2's cause confirmed live: the page rendered the description twice.
+- Added `tools/package-release.mjs` (deterministic ZIP from a commit, named
+  from that commit's manifest, with SHA-256 and runtime object IDs) and
+  `THQ_EXT_DIR` for the harness to test a packaged folder.
+- Not released: live checks required by the brief remain outstanding
+  (RELEASE_NOTES_v1.2.0.md §9); release procedure in §12.
+
 ### Fixed after live acceptance finding #2 (2026-10-10)
 
 - **Channel description recorded twice** for `@TvMisericordiaPL`. The reader
