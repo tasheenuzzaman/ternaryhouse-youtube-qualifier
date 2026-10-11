@@ -60,6 +60,18 @@ Everything in `lib/`, `background/`, `options/`, `content/render.js`,
 `TARGET_CANDIDATES` (30), `checkLatestOrdering()`, `readSortChips()`, the
 `ANALYZE` request, permissions, key handling and storage isolation.
 
+### Founder decisions (2026-10-11) — release still on hold
+
+- **Evidence Maker gate kept.** Evidence Maker v1.4 is approved and installed
+  (accepts `TERNARY_HOUSE_BROWSER_EVIDENCE_INPUT`, produces CEP schema 1.3) and
+  was tested on three real creators with READY CEPs accepted by ChatGPT
+  Classifier v1.5 and Gemini Classifier v1.7 (founder-reported). Remaining:
+  confirm those inputs came from `1.2.0-candidate.3`, or run Evidence Maker
+  once on a `candidate.3` block (RELEASE_NOTES_v1.2.0.md §9, item 16).
+- **Members-only videos:** current behaviour kept; no new exclusion.
+- **English YouTube UI:** confirmed for operators.
+- Docs only; no runtime change.
+
 ### Release-readiness audit (2026-10-11) — not yet released
 
 - No runtime change: the tested build `1.2.0-candidate.3` (`dece8f0`) is

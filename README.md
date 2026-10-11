@@ -431,8 +431,8 @@ Skipped scheduled/live cards are listed separately under
 `excluded_not_in_sample`.
 
 - It is **source evidence, not a Creator Evidence Packet** — never labelled
-  READY. The Evidence Maker still validates it (and needs a spec update before
-  Ohi relies on it; see the release notes).
+  READY. The Creator Evidence Maker (v1.4, founder-approved) takes it as input
+  and remains the validation step that produces the CEP.
 - Nothing is invented. The About panel is not opened, so country, joined date
   and lifetime views are `null`; the description is the header preview
   (`PARTIAL`). Thumbnail lettering is not read (no OCR). Every missing field is

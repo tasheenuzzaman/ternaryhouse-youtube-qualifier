@@ -2,8 +2,9 @@
 
 **Status: CANDIDATE — for founder acceptance testing only. NOT authorized for
 production.** v1.1.0 remains the stable release. No stable ZIP has been
-produced, and the installed production extension, Evidence Maker, ChatGPT and
-Gemini classifiers and Ohi's runbook are unchanged.
+produced, and the installed production extension is unchanged. This extension
+work did not modify the Evidence Maker, the classifiers or Ohi's runbook; the
+founder separately approved Evidence Maker v1.4 (see section 9, item 16).
 
 **Specification:** `TERNARY_HOUSE_YOUTUBE_QUALIFIER_CHANNEL_DETAILS_AND_ALL_URLS_IMPLEMENTATION_BRIEF_v1.2.md`
 
@@ -361,16 +362,40 @@ observed live by the build environment.
 | 11 | Missing API key: exports work; Avg Views shows the key message | **OUTSTANDING** | Required by the brief. |
 | 12 | Avg Views / Engagement unchanged from v1.1.0 | PARTIAL | Metric code byte-identical to v1.1.0 (diff). Live values produced (859 / 16.01%) but not compared with v1.1.0 on the same channel. |
 | 13 | Narrow window: bar wraps, chips and header usable | Recommended | Simulated only (harness, fixture CSS). |
-| 14 | Operator YouTube UI is English | Confirm per machine | Live strings seen were English. |
+| 14 | Operator YouTube UI is English | **CONFIRMED (founder decision)** | 2026-10-11: operators use English-language YouTube, as the publication-state reader requires. |
 | 15 | Timing: capture vs screenshots; time to a validated CEP | Measurement outstanding | Brief §6 performance verification. |
-| 16 | Evidence Maker consumes the block correctly | **OUTSTANDING — founder decision** | Brief §8: "Release remains pending until … the revised Evidence Maker consumes the details evidence correctly." Whether this gates the *extension* release, or only Ohi's switch to the screenshot-free workflow, is the founder's call. |
+| 16 | Evidence Maker consumes the block correctly | **Gate kept (founder). Pipeline PASS reported; build confirmation pending** | Founder-reported, 2026-10-11: `TERNARY_HOUSE_CREATOR_EVIDENCE_MAKER_SPEC_v1.4.md` is approved and installed, accepts `TERNARY_HOUSE_BROWSER_EVIDENCE_INPUT` and produces frozen CEP schema 1.3; three real creators (Ash Maurya, Agentic Amit, My Research Support) produced READY CEPs accepted by ChatGPT Classifier v1.5 and Gemini Classifier v1.7. The spec is not in this repository. Minimum remaining check: see below the table. |
+
+**Item 16 — minimum remaining check.** The JSON format changed once during
+the candidate series (measured by running each build's code on the same page):
+
+| From → to | JSON change |
+| --- | --- |
+| `1.2.0-candidate` → `1.2.0-candidate.2` | field added: `sample.videos[].published_text_source`; status text keeps characters such as U+202F |
+| `1.2.0-candidate.2` → `1.2.0-candidate.3` | no format change; description recorded once when the page renders it twice, plus a `capture_limitations` note saying so |
+
+- If the three Evidence Maker inputs show `"tool_version": "1.2.0-candidate.3"`:
+  item 16 is PASS; nothing more to run.
+- Otherwise (`candidate` or `candidate.2`): run Evidence Maker v1.4 once on a
+  `candidate.3` block — the `@TvMisericordiaPL` block from the 2026-10-10
+  retest qualifies, as it carries `published_text_source`, excluded Premieres
+  and the description-copies note — and confirm a READY CEP. Passing that CEP
+  to the classifiers is recommended but adds no extension coverage: CEP schema
+  1.3 is frozen.
+
+**Eligibility rules — founder decision 2026-10-11:** members-only videos keep
+the current behaviour. The runtime code has no members-only rule; such a card
+is classified by its own status text like any other (a published age → eligible).
+A members-only exclusion needs separate policy approval (Evidence Maker v1.4
+spec). No genuine ambiguity in the frozen selection rules has been observed.
 
 ## 10. Known limitations and open risks
 
 - **English UI only for publication state.** Non-English YouTube UI fails
   closed on every card (`Review video status`). This is a deliberate
   regression from v1.1.0, which copied in any language but could include
-  scheduled Premieres.
+  scheduled Premieres. Accepted: operators use English YouTube (founder,
+  2026-10-11).
 - **Unverified live markers.** If live YouTube words a status differently
   (e.g. an absolute date instead of `… ago`), the Latest exports fail closed,
   visibly. If a live card shows *only* a stale upcoming signal and no age,
@@ -381,8 +406,8 @@ observed live by the build environment.
   with no refusal, so every age on those cards was read; which units they
   showed was not recorded. A card whose age cannot be read fails closed with
   `CARD_AGE_UNRECOGNIZED` and its text in the tooltip.
-- **Members-only videos** are treated like any published video; whether they
-  should be excluded as "inaccessible" is an open policy question.
+- **Members-only videos** are treated like any published video. Decided
+  (founder, 2026-10-11): keep; an exclusion requires separate policy approval.
 - **Virtualization** of very long grids is unmeasured (section 9.6).
 - **About panel not opened**: country, joined date, lifetime views and the
   full description are never captured.
@@ -391,11 +416,9 @@ observed live by the build environment.
   description as several elements, one per paragraph, a description consisting
   only of the same paragraph repeated would be recorded once; the
   `capture_limitations` note makes that visible.
-- **Evidence Maker compatibility**: the current Evidence Maker (v1.3) expects
-  screenshot provenance. A new Evidence Maker spec that accepts
-  `browser_dom_capture` / `D1` must be written and validated before Ohi uses
-  this button. ChatGPT classifier v1.4 and Gemini classifier v1.6 compatibility
-  with the resulting CEP has not been reviewed.
+- **Evidence Maker compatibility**: superseded. Evidence Maker v1.4 (founder-
+  approved and installed) accepts this block; see section 9, item 16, for the
+  one build-confirmation check that remains.
 - If DOM-only status reading proves unreliable live, the fallback is an
   optional, separately authorised YouTube Data API eligibility check (it would
   need the API key and quota); it is **not** implemented.
