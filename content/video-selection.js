@@ -512,45 +512,91 @@
    * The general loaded-URL inventory (read-only DOM access)
    * ------------------------------------------------------------------ */
 
+  /** Cards across every supported tab: Videos/Live grids, Shorts, playlists. */
+  const INVENTORY_SELECTOR = `${ITEM_SELECTOR}, ytd-reel-item-renderer, ytd-playlist-video-renderer`;
+
+  /** A Short's ID from its native /shorts/<ID> link. */
+  function shortsIdFromHref(href) {
+    if (typeof href !== 'string' || !href) return null;
+    let url;
+    try {
+      url = new URL(href, 'https://www.youtube.com');
+    } catch {
+      return null;
+    }
+    if (!YOUTUBE_HOSTS.has(url.hostname)) return null;
+    const m = /^\/shorts\/([A-Za-z0-9_-]{11})\/?$/.exec(url.pathname);
+    return m ? m[1] : null;
+  }
+
+  /** The card's title as the page shows it, for records whose API lookup fails. */
+  function inventoryTitle(item) {
+    const nodes = [item.querySelector('h3'), item.querySelector('#video-title'), item.querySelector('#video-title-link')];
+    for (const node of nodes) {
+      const value = attr(node, 'title');
+      if (value && value.trim()) return value.trim();
+      const inner = node && node.querySelector && node.querySelector('a[title]');
+      if (inner && attr(inner, 'title').trim()) return attr(inner, 'title').trim();
+    }
+    for (const node of nodes) {
+      const text = node ? visibleText(node) : '';
+      if (text) return text;
+    }
+    return null;
+  }
+
   /**
-   * Every unique watch URL in the cards currently present in the grid, in
-   * card order, in one pass and with no cap. Independent of sort, of the
-   * 12-video rules and of publication state: a scheduled Premiere card with
-   * a valid watch link is included.
+   * Every unique video in the cards currently present in the grid, in card
+   * order, in one pass and with no cap. Independent of sort, of the 12-video
+   * rules and of publication state: a scheduled Premiere card with a valid
+   * link is included.
    *
+   * options.allowShorts  the Shorts tab: /shorts/<ID> links are videos. On
+   *                      every other surface a Shorts card is skipped, as
+   *                      before.
+   *
+   *   entries     [{ id, kind: 'watch' | 'shorts', title }] in card order
+   *   ids         the same IDs
    *   unresolved  cards that may be videos but cannot be read: no link
    *               rendered yet, or links to two different videos.
    *   nonVideo    cards whose links are all non-video (playlist, channel...).
    */
-  function readLoadedVideoUrls(grid) {
+  function readLoadedVideoUrls(grid, options = {}) {
     const result = {
-      gridFound: false, cardCount: 0, ids: [], shorts: 0, nonVideo: 0, duplicates: 0, unresolved: [],
+      gridFound: false, cardCount: 0, ids: [], entries: [], shorts: 0, nonVideo: 0, duplicates: 0, unresolved: [],
     };
     if (!grid || typeof grid.querySelectorAll !== 'function') return result;
     result.gridFound = true;
+    const allowShorts = Boolean(options.allowShorts);
     const seen = new Set();
     let position = 0;
-    for (const item of grid.querySelectorAll(ITEM_SELECTOR)) {
+    for (const item of grid.querySelectorAll(INVENTORY_SELECTOR)) {
+      // A card nested inside another matched card is the same card.
+      if (item.parentNode && item.parentNode.closest && item.parentNode.closest(INVENTORY_SELECTOR)) continue;
       position += 1;
-      if (item.querySelector('a[href^="/shorts/"]')) {
+      if (!allowShorts && item.querySelector('a[href^="/shorts/"]')) {
         result.shorts += 1;
         continue;
       }
       let anyHref = false;
-      const ids = [];
+      const found = [];
       for (const anchor of item.querySelectorAll('a[href]')) {
         const href = anchor.getAttribute('href');
         if (href) anyHref = true;
-        const id = watchIdFromHref(href);
-        if (id && !ids.includes(id)) ids.push(id);
+        const watch = watchIdFromHref(href);
+        const short = allowShorts ? shortsIdFromHref(href) : null;
+        const id = watch || short;
+        if (id && !found.some((f) => f.id === id)) found.push({ id, kind: watch ? 'watch' : 'shorts' });
       }
-      if (ids.length === 1) {
-        if (seen.has(ids[0])) result.duplicates += 1;
+      if (found.length === 1) {
+        const { id, kind } = found[0];
+        if (seen.has(id)) result.duplicates += 1;
         else {
-          seen.add(ids[0]);
-          result.ids.push(ids[0]);
+          seen.add(id);
+          result.ids.push(id);
+          result.entries.push({ id, kind, title: inventoryTitle(item) });
         }
-      } else if (ids.length > 1) {
+      } else if (found.length > 1) {
         result.unresolved.push({ position, reason: 'CONFLICTING_LINKS' });
       } else if (!anyHref) {
         result.unresolved.push({ position, reason: 'NOT_RENDERED' });
@@ -598,6 +644,8 @@
     readCardDetails,
     readVideoCards,
     readLoadedVideoUrls,
+    shortsIdFromHref,
+    inventoryTitle,
     sortLabelFromChips,
     visibleText,
   };

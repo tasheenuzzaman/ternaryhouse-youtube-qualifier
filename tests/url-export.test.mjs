@@ -55,18 +55,18 @@ const IDS = [
 const MORE = ['MMMMMMMMMM3', 'NNNNNNNNNN4', 'OOOOOOOOOO5'];
 
 const EXPECTED_BLOCK = [
-  '1. https://www.youtube.com/watch?v=AAAAAAAAAA1',
-  '2. https://www.youtube.com/watch?v=BBBBBBBBBB2',
-  '3. https://www.youtube.com/watch?v=CCCCCCCCCC3',
-  '4. https://www.youtube.com/watch?v=DDDDDDDDDD4',
-  '5. https://www.youtube.com/watch?v=EEEEEEEEEE5',
-  '6. https://www.youtube.com/watch?v=FFFFFFFFFF6',
-  '7. https://www.youtube.com/watch?v=GGGGGGGGGG7',
-  '8. https://www.youtube.com/watch?v=HHHHHHHHHH8',
-  '9. https://www.youtube.com/watch?v=IIIIIIIIII9',
-  '10. https://www.youtube.com/watch?v=JJJJJJJJJ_0',
-  '11. https://www.youtube.com/watch?v=KKKKKKKKK-1',
-  '12. https://www.youtube.com/watch?v=LLLLLLLLLL2',
+  'https://www.youtube.com/watch?v=AAAAAAAAAA1',
+  'https://www.youtube.com/watch?v=BBBBBBBBBB2',
+  'https://www.youtube.com/watch?v=CCCCCCCCCC3',
+  'https://www.youtube.com/watch?v=DDDDDDDDDD4',
+  'https://www.youtube.com/watch?v=EEEEEEEEEE5',
+  'https://www.youtube.com/watch?v=FFFFFFFFFF6',
+  'https://www.youtube.com/watch?v=GGGGGGGGGG7',
+  'https://www.youtube.com/watch?v=HHHHHHHHHH8',
+  'https://www.youtube.com/watch?v=IIIIIIIIII9',
+  'https://www.youtube.com/watch?v=JJJJJJJJJ_0',
+  'https://www.youtube.com/watch?v=KKKKKKKKK-1',
+  'https://www.youtube.com/watch?v=LLLLLLLLLL2',
 ].join('\n');
 
 /**
@@ -151,10 +151,10 @@ test('A. 12 known IDs produce exactly the locked 12-line block', () => {
 test('B. order is preserved: newest stays first, oldest stays last', () => {
   const lines = X.formatExportBlock(IDS).split('\n');
   for (let i = 0; i < 12; i += 1) {
-    equal(lines[i], `${i + 1}. https://www.youtube.com/watch?v=${IDS[i]}`, `line ${i + 1}`);
+    equal(lines[i], `https://www.youtube.com/watch?v=${IDS[i]}`, `line ${i + 1}`);
   }
   const reversed = X.formatExportBlock(IDS.slice().reverse()).split('\n');
-  equal(reversed[0], `1. https://www.youtube.com/watch?v=${IDS[11]}`, 'input order is never re-sorted');
+  equal(reversed[0], `https://www.youtube.com/watch?v=${IDS[11]}`, 'input order is never re-sorted');
 });
 
 test('C. duplicate DOM IDs cannot produce duplicate lines', () => {
@@ -198,7 +198,7 @@ test('F. links are canonicalised: only the video ID survives', () => {
   const { ids } = X.selectExportIds(noisy.map((href) => ({ shorts: false, href, state: PUBLISHED })));
   equal(X.formatExportBlock(ids), EXPECTED_BLOCK, 'canonical output');
   for (const line of X.formatExportBlock(ids).split('\n')) {
-    assert(/^\d{1,2}\. https:\/\/www\.youtube\.com\/watch\?v=[A-Za-z0-9_-]{11}$/.test(line), `canonical: ${line}`);
+    assert(/^https:\/\/www\.youtube\.com\/watch\?v=[A-Za-z0-9_-]{11}$/.test(line), `canonical, unnumbered: ${line}`);
   }
   equal(X.canonicalWatchUrl('AAAAAAAAAA1'), 'https://www.youtube.com/watch?v=AAAAAAAAAA1', 'canonicalWatchUrl');
 });

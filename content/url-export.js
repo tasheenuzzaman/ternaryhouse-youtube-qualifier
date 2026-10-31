@@ -56,18 +56,37 @@
    * The paste-ready clipboard block, or null unless given exactly 12 unique
    * valid IDs. A partial or padded list is never produced.
    *
-   *   1. https://www.youtube.com/watch?v=AAAAAAAAAAA
+   *   https://www.youtube.com/watch?v=AAAAAAAAAAA
    *   ...
-   *   12. https://www.youtube.com/watch?v=LLLLLLLLLLL
+   *   https://www.youtube.com/watch?v=LLLLLLLLLLL
    *
-   * No heading, titles, dates, bullets, Markdown, blank lines or trailing
-   * newline.
+   * One URL per line (v1.3.0: no numbering). No heading, titles, dates,
+   * bullets, Markdown, blank lines, trailing spaces or trailing newline.
    */
   function formatExportBlock(ids) {
     if (!Array.isArray(ids) || ids.length !== EXPORT_COUNT) return null;
     if (!ids.every(isValidVideoId)) return null;
     if (new Set(ids).size !== EXPORT_COUNT) return null;
-    return ids.map((id, i) => `${i + 1}. ${WATCH_BASE}${id}`).join('\n');
+    return ids.map((id) => `${WATCH_BASE}${id}`).join('\n');
+  }
+
+  const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+  /**
+   * The text/html companion of a plain-text block: the same lines, one block
+   * element each, with every URL line a link. The visible text equals the
+   * plain text, so pasting either gives the same content.
+   */
+  function linksHtml(text) {
+    if (typeof text !== 'string' || !text) return null;
+    const lines = text.split('\n').map((line) => {
+      if (!line) return '<div><br></div>';
+      if (/^https:\/\/www\.youtube\.com\/(?:watch\?v=|shorts\/)[A-Za-z0-9_-]{11}$/.test(line)) {
+        return `<div><a href="${escapeHtml(line)}">${escapeHtml(line)}</a></div>`;
+      }
+      return `<div>${escapeHtml(line)}</div>`;
+    });
+    return lines.join('');
   }
 
   /** Back-compat names: the 12-video selector is the shared publication-aware one. */
@@ -110,8 +129,11 @@
    * The Latest-only 12-video export operation
    * ------------------------------------------------------------------ */
 
-  /** Default output: the locked 12-line URL block. */
-  const urlBlockFormat = (selection) => ({ text: formatExportBlock(selection.ids) });
+  /** Default output: the 12-line URL block, plus clickable links. */
+  const urlBlockFormat = (selection) => {
+    const text = formatExportBlock(selection.ids);
+    return { text, html: linksHtml(text) };
+  };
 
   /**
    * One exporter per button per Controller, so it is created and destroyed
@@ -128,7 +150,7 @@
    *                                 undecided item to finish rendering
    *   saveScroll()     -> token
    *   restoreScroll(t)
-   *   copy(text)       -> Promise<boolean>   the existing clipboard helper
+   *   copy(text, html) -> Promise<boolean>   the clipboard helper (html optional)
    *   lock                          createDomLock(), shared with metrics
    *   format(selection) -> { text } | { status, ... }   default: 12-line block
    *   name             lock holder name, default 'export'
@@ -152,9 +174,9 @@
 
     const sameScope = (scope) => deps.isAlive() && deps.scopeKey() === scope;
 
-    async function safeCopy(text) {
+    async function safeCopy(text, html) {
       try {
-        return Boolean(await deps.copy(text));
+        return Boolean(await deps.copy(text, html));
       } catch {
         return false;
       }
@@ -227,16 +249,16 @@
 
       const formatted = format(selection) || {};
       if (formatted.status) return { ...formatted, excludedCount };
-      const { text } = formatted;
+      const { text, html } = formatted;
       if (!text) return { status: 'INSUFFICIENT', count: selection.ids.length, excludedCount };
 
-      if (await safeCopy(text)) return { status: 'COPIED', count: EXPORT_COUNT, excludedCount };
+      if (await safeCopy(text, html)) return { status: 'COPIED', count: EXPORT_COUNT, excludedCount };
 
       // The copy ran after asynchronous waiting. If the browser refused it
       // because the click's user activation had expired, a second click (with
       // fresh activation) can copy the same, re-validated block.
       if (collected.loaded || lockWasBusy) {
-        prepared = { scope, ids: selection.ids.slice(), text, excludedCount, at: now() };
+        prepared = { scope, ids: selection.ids.slice(), text, html, excludedCount, at: now() };
         return { status: 'READY' };
       }
       return { status: 'COPY_FAILED' };
@@ -250,7 +272,7 @@
           const p = prepared;
           prepared = null; // single-use, whatever happens next
           if (preparedStillValid(p)) {
-            return (await safeCopy(p.text))
+            return (await safeCopy(p.text, p.html))
               ? { status: 'COPIED', count: EXPORT_COUNT, excludedCount: p.excludedCount }
               : { status: 'COPY_FAILED' };
           }
@@ -304,29 +326,36 @@
   const copiedUrlsText = (n) => `Copied ${n} URL${n === 1 ? '' : 's'}`;
   const notReadyText = (n) => `${n} card${n === 1 ? '' : 's'} not ready — retry`;
 
+  /** Sort labels the general block may carry; anything else is Unknown. */
+  const INVENTORY_SORTS = [...SORT_LABELS, 'Playlist order'];
+
+  const entryUrl = (e) => (e.kind === 'shorts' ? `https://www.youtube.com/shorts/${e.id}` : `${WATCH_BASE}${e.id}`);
+
   /**
    * The general inventory block, or null for an empty or malformed list:
    *
    *   Total URLs: 347
    *   Sort: Oldest
    *
-   *   1. https://www.youtube.com/watch?v=AAAAAAAAAAA
+   *   https://www.youtube.com/watch?v=AAAAAAAAAAA
    *   ...
-   *   347. https://www.youtube.com/watch?v=ZZZZZZZZZZZ
+   *   https://www.youtube.com/shorts/ZZZZZZZZZZZ
    *
-   * The count is the number of numbered lines. Plain text, no trailing
-   * newline. An unrecognised sort is written as `Unknown`.
+   * `items` are IDs (watch URLs) or { id, kind } entries (a Short keeps its
+   * native /shorts/ URL). One URL per line, no numbering (v1.3.0). The count
+   * is the number of URL lines. Plain text, no trailing newline.
    */
-  function formatAllUrlsBlock(ids, sortLabel) {
-    if (!Array.isArray(ids) || !ids.length) return null;
-    if (!ids.every(isValidVideoId)) return null;
-    if (new Set(ids).size !== ids.length) return null;
-    const sort = SORT_LABELS.includes(sortLabel) ? sortLabel : 'Unknown';
+  function formatAllUrlsBlock(items, sortLabel) {
+    if (!Array.isArray(items) || !items.length) return null;
+    const entries = items.map((it) => (typeof it === 'string' ? { id: it, kind: 'watch' } : it));
+    if (!entries.every((e) => e && isValidVideoId(e.id))) return null;
+    if (new Set(entries.map((e) => e.id)).size !== entries.length) return null;
+    const sort = INVENTORY_SORTS.includes(sortLabel) ? sortLabel : 'Unknown';
     return [
-      `Total URLs: ${ids.length}`,
+      `Total URLs: ${entries.length}`,
       `Sort: ${sort}`,
       '',
-      ...ids.map((id, i) => `${i + 1}. ${WATCH_BASE}${id}`),
+      ...entries.map(entryUrl),
     ].join('\n');
   }
 
@@ -338,11 +367,11 @@
    *
    * deps:
    *   isAlive()        -> boolean
-   *   onVideosRoute()  -> boolean   still on this creator's Videos tab
+   *   onVideosRoute()  -> boolean   still on the creator tab / playlist it was mounted on
    *   isBusy()         -> boolean   another export or metric is scrolling
    *   readInventory()  -> readLoadedVideoUrls(grid)
    *   readSort()       -> 'Latest' | 'Popular' | 'Oldest' | 'Unknown'
-   *   copy(text)       -> Promise<boolean>
+   *   copy(text, html) -> Promise<boolean>
    */
   function createAllUrlsExporter(deps) {
     let running = false;
@@ -361,17 +390,17 @@
         if (inventory.unresolved.length) {
           return { status: 'NOT_READY', count: inventory.unresolved.length, unresolved: inventory.unresolved };
         }
-        const text = formatAllUrlsBlock(inventory.ids, sort);
-        if (!text) return { status: 'NONE' };
+        const text = formatAllUrlsBlock(inventory.entries && inventory.entries.length ? inventory.entries : inventory.ids, sort);
+        if (!text) return { status: 'NONE', nonVideo: inventory.nonVideo };
 
         let ok = false;
         try {
-          ok = Boolean(await deps.copy(text));
+          ok = Boolean(await deps.copy(text, linksHtml(text)));
         } catch {
           ok = false;
         }
         return ok
-          ? { status: 'COPIED', count: inventory.ids.length, sort: SORT_LABELS.includes(sort) ? sort : 'Unknown', inventory }
+          ? { status: 'COPIED', count: inventory.ids.length, sort: INVENTORY_SORTS.includes(sort) ? sort : 'Unknown', inventory }
           : { status: 'COPY_FAILED' };
       } catch {
         return { status: 'COPY_FAILED' };
@@ -400,6 +429,85 @@
     }
   }
 
+  /* ------------------------------------------------------------------ *
+   * Download all video descriptions — the trigger
+   * ------------------------------------------------------------------ */
+
+  /**
+   * Snapshots the SAME inventory Copy all video URLs reads, at click time,
+   * and hands it to the service worker, which fetches and downloads in the
+   * background. The page can be left immediately afterwards.
+   *
+   * deps: isAlive, onVideosRoute, isBusy, readInventory, readContext() -> page
+   *       context (channel, tab, sort, playlist), start(snapshot) -> Promise<response>
+   */
+  function createDescriptionsExporter(deps) {
+    let running = false;
+
+    async function click() {
+      if (running) return { status: 'IGNORED' };
+      running = true;
+      try {
+        if (!deps.isAlive()) return { status: 'ABORTED' };
+        if (!deps.onVideosRoute()) return { status: 'OFF_ROUTE' };
+        if (deps.isBusy()) return { status: 'BUSY_PAGE' };
+        const inventory = deps.readInventory();
+        if (!inventory || !inventory.gridFound) return { status: 'NO_GRID' };
+        if (inventory.unresolved.length) {
+          return { status: 'NOT_READY', count: inventory.unresolved.length, unresolved: inventory.unresolved };
+        }
+        if (!inventory.entries.length) return { status: 'NONE', nonVideo: inventory.nonVideo };
+        const snapshot = { ...deps.readContext(), capturedAt: Date.now(), items: inventory.entries.map((e) => ({ ...e })) };
+        const response = await deps.start(snapshot);
+        if (response && response.ok) return { status: 'STARTED', job: response.job };
+        const error = (response && response.error) || { code: 'UNEXPECTED', message: 'The extension did not answer.' };
+        return { status: error.code === 'BUSY' ? 'JOB_BUSY' : 'START_FAILED', error, job: response && response.job };
+      } catch {
+        return { status: 'START_FAILED', error: { code: 'UNEXPECTED', message: 'The extension did not answer.' } };
+      } finally {
+        running = false;
+      }
+    }
+
+    return { click, get running() { return running; } };
+  }
+
+  const DESCRIPTIONS_TEXT = Object.freeze({ IDLE: 'Download all video descriptions' });
+
+  /** Label for a background job's public state. Null = leave the label alone. */
+  function descriptionsJobText(job) {
+    if (!job) return null;
+    const c = job.counts;
+    switch (job.state) {
+      case 'running': return `Descriptions ${job.processed || 0}/${job.total}…`;
+      case 'downloading': return 'Saving file…';
+      case 'done': return c && c.missing ? `Downloaded ${c.total} (${c.missing} missing)` : `Downloaded ${c ? c.total : job.total}`;
+      case 'interrupted': return 'Interrupted — click to retry';
+      case 'failed':
+        if (job.error && job.error.code === 'NO_API_KEY') return 'API key required';
+        if (job.error && job.error.code === 'QUOTA_EXCEEDED') return 'API quota exceeded';
+        return 'Download failed';
+      default: return null;
+    }
+  }
+
+  function descriptionsButtonText(result) {
+    switch (result && result.status) {
+      case 'STARTED': return descriptionsJobText(result.job) || 'Starting…';
+      case 'JOB_BUSY': return result.job ? `Already running ${result.job.processed}/${result.job.total}` : 'Already running';
+      case 'START_FAILED':
+        if (result.error && result.error.code === 'NO_API_KEY') return 'API key required';
+        return 'Could not start';
+      case 'NONE': return 'No loaded videos';
+      case 'NO_GRID': return ALL_URLS_TEXT.NO_GRID;
+      case 'OFF_ROUTE': return ALL_URLS_TEXT.OFF_ROUTE;
+      case 'BUSY_PAGE': return ALL_URLS_TEXT.BUSY;
+      case 'NOT_READY': return notReadyText(result.count || 0);
+      case 'ABORTED': return DESCRIPTIONS_TEXT.IDLE;
+      default: return null;
+    }
+  }
+
   self.THQUrlExport = {
     EXPORT_COUNT,
     EXPORT_TEXT,
@@ -410,13 +518,18 @@
     watchIdFromHref,
     formatExportBlock,
     formatAllUrlsBlock,
+    linksHtml,
     readGridEntries,
     readLoadedVideoUrls,
     selectExportIds,
     createDomLock,
     createUrlExporter,
     createAllUrlsExporter,
+    createDescriptionsExporter,
     exportButtonText,
     allUrlsButtonText,
+    descriptionsButtonText,
+    descriptionsJobText,
+    DESCRIPTIONS_TEXT,
   };
 })();

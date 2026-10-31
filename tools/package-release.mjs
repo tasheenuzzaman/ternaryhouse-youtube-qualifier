@@ -3,8 +3,10 @@
  *
  *   node tools/package-release.mjs [--commit <ref>] [--out <dir>]
  *
- * - The archive holds exactly the files tracked at that commit, under one
- *   top-level folder, via `git archive` (same commit -> same contents).
+ * - The archive holds the loadable extension only — the runtime paths below
+ *   plus README.md, as tracked at that commit, under one top-level folder,
+ *   via `git archive` (same commit -> same contents). No tests, internal
+ *   documents, tooling or history.
  * - The name comes from that commit's manifest: `version_name` if present
  *   (e.g. v1.2.0-candidate.3), otherwise `v<version>-stable`. A "-stable"
  *   archive is therefore only possible from a commit whose manifest has no
@@ -36,14 +38,16 @@ const folder = 'ternaryhouse-youtube-qualifier';
 const zipName = `${folder}-${label}.zip`;
 const zipPath = join(outDir, zipName);
 
+const RUNTIME = ['manifest.json', 'background', 'content', 'lib', 'options', 'icons'];
+const PACKAGED = [...RUNTIME, 'README.md'];
+
 mkdirSync(outDir, { recursive: true });
-execFileSync('git', ['archive', '--format=zip', `--prefix=${folder}/`, '-o', zipPath, commit]);
+execFileSync('git', ['archive', '--format=zip', `--prefix=${folder}/`, '-o', zipPath, commit, '--', ...PACKAGED]);
 
 const sha256 = createHash('sha256').update(readFileSync(zipPath)).digest('hex');
 writeFileSync(`${zipPath}.sha256`, `${sha256}  ${zipName}\n`);
 
-const RUNTIME = ['manifest.json', 'background', 'content', 'lib', 'options', 'icons'];
-const files = git('ls-tree', '-r', '--name-only', commit).split('\n');
+const files = git('ls-tree', '-r', '--name-only', commit, '--', ...PACKAGED).split('\n');
 
 console.log(`commit        ${commit}`);
 console.log(`manifest      version ${manifest.version}${manifest.version_name ? `, version_name ${manifest.version_name}` : ''}`);

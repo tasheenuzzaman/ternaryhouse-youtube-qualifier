@@ -54,6 +54,31 @@
   const isVideosRoute = (route) => Boolean(route) && route.tab === 'videos';
 
   /**
+   * Surfaces where the loaded-card exports run. The Videos tab also carries
+   * the metrics and the 12-video exports; the others get the two inventory
+   * buttons only. `slug` names the tab in the descriptions file name.
+   */
+  const INVENTORY_TABS = Object.freeze({
+    videos: { label: 'Videos', slug: 'videos' },
+    shorts: { label: 'Shorts', slug: 'shorts' },
+    streams: { label: 'Live', slug: 'live' },
+    podcasts: { label: 'Podcasts', slug: 'podcasts' },
+    playlist: { label: 'Podcast episodes / playlist', slug: 'playlist' },
+  });
+
+  /** A supported channel tab, or a playlist page (podcast episode lists). */
+  function parsePageRoute(href) {
+    const channel = parseChannelRoute(href);
+    if (channel) return INVENTORY_TABS[channel.tab] ? { ...channel, kind: 'channel' } : null;
+    let url;
+    try { url = new URL(href); } catch { return null; }
+    if (url.hostname !== 'www.youtube.com' || url.pathname !== '/playlist') return null;
+    const list = url.searchParams.get('list');
+    if (!list || !/^[A-Za-z0-9_-]{2,64}$/.test(list)) return null;
+    return { kind: 'playlist', base: `playlist?list=${list}`, tab: 'playlist', listId: list, sortParam: null };
+  }
+
+  /**
    * The Latest / Popular / Oldest chips, in the current view-model markup with
    * a fallback to the legacy renderer. Verified against live YouTube: the
    * chips are button[role="tab"] inside chip-bar-view-model, and the active
@@ -149,6 +174,25 @@
     'ytd-browse[page-subtype="channels"] ytd-rich-grid-renderer',
     'ytd-browse[page-subtype="channels"] ytd-section-list-renderer #contents',
   ];
+
+  const PLAYLIST_GRID_SELECTOR = 'ytd-browse[page-subtype="playlist"] ytd-playlist-video-list-renderer';
+
+  function firstVisible(selector) {
+    for (const node of document.querySelectorAll(selector)) {
+      if (!node.closest('[hidden]')) return node;
+    }
+    return null;
+  }
+
+  /** The grid the inventory exports read: the visible one for this surface. */
+  function findInventoryGrid(route) {
+    if (route && route.kind === 'playlist') return firstVisible(PLAYLIST_GRID_SELECTOR);
+    for (const selector of GRID_SELECTORS) {
+      const node = firstVisible(selector);
+      if (node) return node;
+    }
+    return null;
+  }
 
   function findGrid() {
     for (const selector of GRID_SELECTORS) {
@@ -285,7 +329,7 @@
    * ================================================================== */
 
   const {
-    STYLES, applyStyles, el, copyText: copyToClipboard, bindCopyControl, copyFeedback,
+    STYLES, applyStyles, el, copyText: copyToClipboard, copyRich, bindCopyControl, copyFeedback,
     compactAvgViewsText, compactCopyValue, LOADING_TEXT, ERROR_TEXT,
     renderAvgViewsPanel: drawAvgViewsPanel,
     renderEngagementPanel: drawEngagementPanel,
@@ -300,14 +344,50 @@
    * never change TARGET_CANDIDATES, and never send ANALYZE.
    * ================================================================== */
 
-  const { sortLabelFromChips } = self.THQVideoSelection;
+  const { sortLabelFromChips, visibleText } = self.THQVideoSelection;
   const {
     EXPORT_TEXT, ALL_URLS_TEXT, readGridEntries, readLoadedVideoUrls, createDomLock,
     createUrlExporter, createAllUrlsExporter, exportButtonText, allUrlsButtonText,
+    createDescriptionsExporter, descriptionsButtonText, descriptionsJobText, DESCRIPTIONS_TEXT,
   } = self.THQUrlExport;
   const {
     DETAILS_TEXT, findChannelHeader, readChannelHeader, createDetailsFormat, detailsButtonText,
+    resolveChannelIdentity,
   } = self.THQChannelDetails;
+
+  /** Clipboard: plain text always; clickable links too when html is given. */
+  const copyExport = (text, html) => (html ? copyRich(text, html) : copyToClipboard(text));
+
+  const DESCRIPTIONS_POLL_MS = 1000;
+  const DESCRIPTIONS_RESULT_MS = 15000;
+
+  /** Owner channel and title of a playlist page, as far as the page shows them. */
+  function readPlaylistContext(route) {
+    const root = document.querySelector('ytd-browse[page-subtype="playlist"]');
+    const out = {
+      playlistId: route.listId,
+      playlistUrl: `https://www.youtube.com/playlist?list=${route.listId}`,
+      playlistTitle: null, channelName: null, channelUrl: null, channelHandle: null,
+    };
+    if (root) {
+      const outsideList = (node) => !node.closest('ytd-playlist-video-list-renderer');
+      const h1 = Array.from(root.querySelectorAll('h1')).find(outsideList);
+      out.playlistTitle = h1 ? visibleText(h1) || null : null;
+      const owner = Array.from(root.querySelectorAll('a[href^="/@"], a[href^="/channel/"]')).find((a) => outsideList(a) && visibleText(a));
+      if (owner) {
+        const path = owner.getAttribute('href').split(/[?#]/)[0];
+        out.channelName = visibleText(owner).replace(/^by\s+/i, '') || null;
+        out.channelUrl = `https://www.youtube.com${path}`;
+        const handle = /^\/(@[^/]+)/.exec(path);
+        if (handle) { try { out.channelHandle = decodeURIComponent(handle[1]); } catch { out.channelHandle = handle[1]; } }
+      }
+    }
+    if (!out.playlistTitle) {
+      const m = /^(?:\(\d+\+?\)\s*)?(.+?)\s+-\s+YouTube$/.exec(document.title.trim());
+      out.playlistTitle = m ? m[1] : null;
+    }
+    return out;
+  }
 
   const EXPORT_STEP_TIMEOUT_MS = 2500;
   const EXPORT_SETTLE_MS = 250;
@@ -344,6 +424,13 @@
         return `The channel header did not match this page (${(result.problems || []).join(', ')}). Reload the page and retry. Nothing was copied.`;
       case 'NOT_READY':
         return `Grid card(s) ${result.unresolved.map((u) => u.position).join(', ')} have not finished rendering. Wait a moment and retry. Nothing was copied.`;
+      case 'NONE':
+        return result.nonVideo
+          ? 'The loaded cards are not individual videos (on the Podcasts tab they are podcast playlists). Open a podcast, then use this button on its episode list.'
+          : 'No video cards are loaded on this page.';
+      case 'START_FAILED':
+      case 'JOB_BUSY':
+        return result.error ? result.error.message : null;
       case 'COPIED':
         if (result.inventory) {
           const inv = result.inventory;
@@ -403,8 +490,9 @@
   let current = null;
 
   class Controller {
-    constructor(route, identity, grid, barMount) {
+    constructor(route, identity, grid, barMount, mode = 'full') {
       this.route = route;
+      this.mode = mode;
       this.identity = identity;
       this.grid = grid;
       this.token = Symbol('page');
@@ -431,6 +519,7 @@
       else barMount.node.parentNode.insertBefore(this.barHost, barMount.node);
 
       grid.parentNode.insertBefore(this.panelHost, grid);
+      this.checkDescriptionJob();
     }
 
     makeHost(variantClass) {
@@ -444,7 +533,132 @@
       return host;
     }
 
+    /** Copy all video URLs and Download all video descriptions: one inventory. */
+    buildInventoryActions() {
+      const surface = this.mode === 'full' ? 'Videos grid' : 'page';
+      const noneLabel = (fallback) => (r) => (r && r.status === 'NONE' && this.route.tab === 'podcasts'
+        ? 'Open a podcast to export its episodes' : fallback(r));
+      this.allAction = this.makeAction({
+        idleText: ALL_URLS_TEXT.IDLE,
+        workingText: ALL_URLS_TEXT.IDLE,
+        title: `Copy every video URL currently loaded on this ${surface}, in on-page order (any sort; no scrolling)`,
+        exporter: createAllUrlsExporter({
+          isAlive: () => this.alive,
+          onVideosRoute: () => this.exportScopeKey() !== 'off-route',
+          isBusy: () => this.domLock.holder !== null,
+          readInventory: () => this.readInventory(),
+          readSort: () => this.sortLabel(),
+          copy: copyExport,
+        }),
+        textFor: noneLabel(allUrlsButtonText),
+      });
+      this.descAction = this.makeAction({
+        idleText: DESCRIPTIONS_TEXT.IDLE,
+        workingText: 'Starting…',
+        title: 'Download the descriptions of every video currently loaded on this page as a UTF-8 .txt file (YouTube Data API; continues in the background)',
+        exporter: createDescriptionsExporter({
+          isAlive: () => this.alive,
+          onVideosRoute: () => this.exportScopeKey() !== 'off-route',
+          isBusy: () => this.domLock.holder !== null,
+          readInventory: () => this.readInventory(),
+          readContext: () => this.descriptionContext(),
+          start: (snapshot) => sendMessage('DESCRIPTIONS_START', snapshot),
+        }),
+        textFor: noneLabel(descriptionsButtonText),
+        onResult: (result) => {
+          if (result.status === 'STARTED' || result.status === 'JOB_BUSY') this.watchDescriptions();
+        },
+      });
+    }
+
+    readInventory() {
+      return readLoadedVideoUrls(findInventoryGrid(this.route), { allowShorts: this.route.tab === 'shorts' });
+    }
+
+    sortLabel() {
+      return this.route.kind === 'playlist' ? 'Playlist order' : sortLabelFromChips(readSortChipState());
+    }
+
+    /** What the descriptions file says about where its videos came from. */
+    descriptionContext() {
+      const tab = INVENTORY_TABS[this.route.tab] || INVENTORY_TABS.videos;
+      const ctx = { tab: tab.slug, tabLabel: tab.label, sort: this.sortLabel() };
+      if (this.route.kind === 'playlist') return { ...ctx, ...readPlaylistContext(this.route) };
+      const identity = resolveChannelIdentity({
+        header: readChannelHeader(findChannelHeader(document)),
+        route: parseChannelRoute(location.href),
+        documentTitle: document.title,
+      });
+      return {
+        ...ctx,
+        channelName: identity.channel.channel_name,
+        channelUrl: identity.channel.channel_url,
+        channelHandle: identity.channel.channel_handle,
+      };
+    }
+
+    /** Show a running (or just finished) background job on this page's button. */
+    async checkDescriptionJob() {
+      const response = await sendMessage('DESCRIPTIONS_STATUS', {});
+      const job = response && response.ok ? response.job : null;
+      if (job && (job.state === 'running' || job.state === 'downloading') && this.alive) this.watchDescriptions();
+    }
+
+    watchDescriptions() {
+      const action = this.descAction;
+      clearTimeout(this._descPoll);
+      const tick = async () => {
+        if (!this.alive) return;
+        const response = await sendMessage('DESCRIPTIONS_STATUS', {});
+        if (!this.alive) return;
+        const job = response && response.ok ? response.job : null;
+        clearTimeout(action.timer);
+        if (!job) { this.setActionLabel(action, action.idleText); return; }
+        const label = descriptionsJobText(job);
+        if (label) this.setActionLabel(action, label, this.descriptionsDetail(job));
+        if (job.state === 'running' || job.state === 'downloading') {
+          this._descPoll = setTimeout(tick, DESCRIPTIONS_POLL_MS);
+        } else {
+          action.timer = setTimeout(() => this.setActionLabel(action, action.idleText), DESCRIPTIONS_RESULT_MS);
+        }
+      };
+      tick();
+    }
+
+    descriptionsDetail(job) {
+      const c = job.counts;
+      if (job.state === 'done' && c) {
+        return `Saved ${job.filename}: ${c.retrieved} with descriptions, ${c.empty} empty, ${c.missing} missing/failed (listed under # MISSING).`;
+      }
+      if (job.error) return `${job.error.message}${job.error.detail ? ` (${job.error.detail})` : ''}`;
+      if (job.state === 'running') return `Fetching descriptions for ${job.total} videos captured at click time. You can leave this page.`;
+      return null;
+    }
+
     buildControls() {
+      this.buildInventoryActions();
+      if (this.mode === 'inventory') {
+        this.toast = el('span', { class: 'toast' });
+        this.actions = [this.allAction, this.descAction];
+        for (const action of this.actions) {
+          action.btn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            this.onActionClick(action);
+          });
+        }
+        this.bar = el('div', { class: 'bar' }, [
+          el('span', { class: 'brand', text: 'TH' }),
+          this.allAction.btn,
+          this.descAction.btn,
+          this.toast,
+        ]);
+        this.panel = el('div', { class: 'panel' });
+        this.barHost.thqWrap.appendChild(this.bar);
+        this.panelHost.thqWrap.appendChild(this.panel);
+        return;
+      }
+
       this.viewsVal = el('span', { class: 'val empty' });
       this.viewsCopy = el('span', { class: 'copy', title: 'Copy the displayed value', role: 'button' });
       this.viewsCopy.textContent = '⧉';
@@ -491,21 +705,7 @@
         })),
         textFor: detailsButtonText,
       });
-      this.allAction = this.makeAction({
-        idleText: ALL_URLS_TEXT.IDLE,
-        workingText: ALL_URLS_TEXT.IDLE,
-        title: 'Copy every video URL currently loaded in this Videos grid, in on-page order (any sort; no scrolling)',
-        exporter: createAllUrlsExporter({
-          isAlive: () => this.alive,
-          onVideosRoute: () => this.exportScopeKey() !== 'off-route',
-          isBusy: () => this.domLock.holder !== null,
-          readInventory: () => readLoadedVideoUrls(findGrid()),
-          readSort: () => sortLabelFromChips(readSortChipState()),
-          copy: (text) => copyToClipboard(text),
-        }),
-        textFor: allUrlsButtonText,
-      });
-      this.actions = [this.urlsAction, this.detailsAction, this.allAction];
+      this.actions = [this.urlsAction, this.detailsAction, this.allAction, this.descAction];
 
       this.refreshBtn = el('button', { class: 'icon', type: 'button', title: 'Recalculate this channel' });
       this.refreshBtn.textContent = '⟳';
@@ -547,6 +747,7 @@
         this.urlsAction.btn,
         this.detailsAction.btn,
         this.allAction.btn,
+        this.descAction.btn,
         this.refreshBtn,
         this.toast,
       ]);
@@ -558,6 +759,7 @@
 
     destroy() {
       this.token = Symbol('dead');
+      clearTimeout(this._descPoll);
       for (const action of this.actions || []) {
         if (action.exporter.invalidate) action.exporter.invalidate();
         clearTimeout(action.timer);
@@ -610,10 +812,10 @@
 
     /* ------------- Copy 12 URLs / Channel Details / all URLs ------------- */
 
-    makeAction({ idleText, workingText, title, exporter, textFor }) {
+    makeAction({ idleText, workingText, title, exporter, textFor, onResult }) {
       const label = el('span', { class: 'lbl', text: idleText });
       const btn = el('button', { class: 'pill thq-export', type: 'button', title }, [label]);
-      return { btn, label, idleText, workingText, idleTitle: title, exporter, textFor, timer: null };
+      return { btn, label, idleText, workingText, idleTitle: title, exporter, textFor, onResult, timer: null };
     }
 
     /** Copy 12 URLs and Copy Channel Details: same deps, different output. */
@@ -628,7 +830,7 @@
         loadMore: (options) => loadMoreGridItems(options),
         saveScroll: () => window.scrollY,
         restoreScroll: (y) => window.scrollTo({ top: y, behavior: 'auto' }),
-        copy: (text) => copyToClipboard(text),
+        copy: copyExport,
         lock: this.domLock,
         readyTtlMs: EXPORT_READY_TTL_MS,
       });
@@ -636,8 +838,8 @@
 
     /** The creator surface a prepared export belongs to. */
     exportScopeKey() {
-      const route = parseChannelRoute(location.href);
-      if (!isVideosRoute(route) || route.base !== this.route.base) return 'off-route';
+      const route = parsePageRoute(location.href);
+      if (!route || route.base !== this.route.base || route.tab !== this.route.tab) return 'off-route';
       return `${route.base}/${route.tab}|${this.identity.channelKey}`;
     }
 
@@ -659,6 +861,7 @@
       }
       if (!this.alive) return;
       this.showActionResult(action, result);
+      if (action.onResult && result) action.onResult(result);
     }
 
     showActionResult(action, result) {
@@ -917,8 +1120,11 @@
     stopMounting();
     if (location.href.indexOf(route.base) === -1) return;
 
-    const grid = findGrid();
-    const mount = findMountPoint();
+    const mode = isVideosRoute(route) ? 'full' : 'inventory';
+    const grid = mode === 'full' ? findGrid() : findInventoryGrid(route);
+    const mount = route.kind === 'playlist'
+      ? (grid && grid.parentNode ? { node: grid, mode: 'before' } : null)
+      : findMountPoint();
 
     if (!grid || !mount) {
       if (Date.now() < mountDeadline) mountTimer = setTimeout(() => tryMount(route), MOUNT_POLL_MS);
@@ -927,7 +1133,7 @@
 
     teardown();
     const identity = detectChannelIdentity(route);
-    current = new Controller(route, identity, grid, mount);
+    current = new Controller(route, identity, grid, mount, mode);
     probeStorageIsolation();
   }
 
@@ -935,9 +1141,9 @@
 
   function syncPage() {
     const href = location.href;
-    const route = parseChannelRoute(href);
+    const route = parsePageRoute(href);
 
-    if (!isVideosRoute(route)) {
+    if (!route) {
       stopMounting();
       teardown();
       lastHref = href;

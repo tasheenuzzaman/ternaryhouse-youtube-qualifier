@@ -1,11 +1,12 @@
 {
   "manifest_version": 3,
   "name": "Ternary House YouTube Qualifier",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Internal Ternary House tool: recent long-form Avg Views and Engagement evidence for a YouTube creator, calculated from official YouTube Data API v3 statistics.",
   "minimum_chrome_version": "102",
   "permissions": [
-    "storage"
+    "storage",
+    "downloads"
   ],
   "host_permissions": [
     "https://www.googleapis.com/youtube/v3/*"

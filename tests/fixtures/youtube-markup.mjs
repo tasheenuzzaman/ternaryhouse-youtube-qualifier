@@ -362,3 +362,35 @@ export function tvMisericordiaShape() {
     return { id, scheduled: false, html: realLockupCard({ id, title: `Msza Święta ${i + 1} — „Różaniec”`, badge: '7:32', stampText: age[0], stampLabel: age[1] }) };
   });
 }
+
+/* ------------------------------------------------------------------ *
+ * v1.3.0 inventory surfaces — SIMULATED (not live captures).
+ * ------------------------------------------------------------------ */
+
+/** A Shorts-tab card (lockup v2 inside the rich grid). */
+export function shortsTabCard({ id, title = 'A Short' }) {
+  return `
+<ytd-rich-item-renderer class="style-scope ytd-rich-grid-renderer">
+  <div id="content"><ytm-shorts-lockup-view-model-v2><ytm-shorts-lockup-view-model class="shortsLockupViewModelHost">
+    <a class="shortsLockupViewModelHostEndpoint reel-item-endpoint" href="/shorts/${id}"><img alt=""></a>
+    <div class="shortsLockupViewModelHostOutsideMetadata"><h3 class="shortsLockupViewModelHostMetadataTitle"><a class="shortsLockupViewModelHostEndpoint" href="/shorts/${id}" title="${esc(title)}"><span role="text">${esc(title)}</span></a></h3>
+    <div class="shortsLockupViewModelHostMetadataSubhead"><span role="text">1.2M views</span></div></div>
+  </ytm-shorts-lockup-view-model></ytm-shorts-lockup-view-model-v2></div>
+</ytd-rich-item-renderer>`;
+}
+
+/** A playlist / podcast-episode row. */
+export function playlistVideoCard({ id, title = 'Episode', list = 'PLpodcast00000000', index = 1 }) {
+  const href = `/watch?v=${id}&list=${list}&index=${index}&pp=iAQB`;
+  return `
+<ytd-playlist-video-renderer class="style-scope ytd-playlist-video-list-renderer">
+  <div id="index-container"><yt-formatted-string id="index">${index}</yt-formatted-string></div>
+  <div id="content"><ytd-thumbnail><a id="thumbnail" href="${esc(href)}"><img alt=""><div id="overlays"><ytd-thumbnail-overlay-time-status-renderer><span id="text">58:01</span></ytd-thumbnail-overlay-time-status-renderer></div></a></ytd-thumbnail>
+  <div id="meta"><h3><a id="video-title" href="${esc(href)}" title="${esc(title)}">${esc(title)}</a></h3>
+  <ytd-video-meta-block><div id="byline-container"><ytd-channel-name><a href="/@AbutaymiyyahMJ">Abu Taymiyyah</a></ytd-channel-name></div></ytd-video-meta-block></div></div>
+</ytd-playlist-video-renderer>`;
+}
+
+export function playlistGrid(cardsHtml) {
+  return `<ytd-playlist-video-list-renderer class="style-scope ytd-item-section-renderer"><div id="contents">${cardsHtml}</div></ytd-playlist-video-list-renderer>`;
+}

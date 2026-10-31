@@ -5,8 +5,41 @@ All notable changes to Ternary House YouTube Qualifier.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 This is an internal tool; versions are not published to the Chrome Web Store.
 
-**Current stable: 1.2.0.** 1.1.0, 1.0.0, 1.0.1 and 1.0.2 remain frozen and
-archived as historical releases.
+**Current stable: 1.3.0.** 1.2.0, 1.1.0, 1.0.0, 1.0.1 and 1.0.2 remain frozen
+and archived as historical releases.
+
+---
+
+## [1.3.0] — 2026-10-31 — STABLE
+
+Full notes: [RELEASE_NOTES_v1.3.0.md](RELEASE_NOTES_v1.3.0.md).
+
+### Changed
+
+- **Copy 12 URLs**: one URL per line, no numbering; same 12 videos, same
+  order, same rules. Clickable links are added as `text/html` alongside the
+  plain text, which stays the dependable fallback.
+- **Copy all video URLs**: numbering removed (header kept), clickable links
+  added, and it now works on the Shorts tab (native `/shorts/<ID>` URLs), the
+  Live tab and podcast/playlist episode lists. The Podcasts tab reports
+  "Open a podcast to export its episodes" instead of copying playlist links.
+
+### Added
+
+- **Download all video descriptions** — same loaded-video inventory as Copy all
+  video URLs, captured at click time; descriptions fetched in the background
+  with `videos.list?part=snippet` (50 per request, bounded retries, exact-ID
+  mapping, page order kept) and saved as one UTF-8 `.txt` with a `# MISSING`
+  section. Continues after leaving the page; refuses duplicate jobs; reports a
+  Chrome restart as interrupted; no file for a missing key or a total
+  quota/auth failure.
+- Permission `downloads` (only new permission).
+
+### Unchanged
+
+Avg Views, Engagement, the 12-video selection and eligibility rules, Copy
+Channel Details and its JSON, API-key storage and isolation. `lib/youtube-api.js`
+only exports its existing error mapper.
 
 ---
 

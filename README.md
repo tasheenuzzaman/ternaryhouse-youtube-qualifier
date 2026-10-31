@@ -6,12 +6,13 @@ recent **Avg Views** and recent **Engagement** evidence.
 
 Open a channel's Videos tab, click one control, copy, move on.
 
-**Version 1.2.0 — STABLE, FOUNDER APPROVED (2026-10-11).** Adds **Copy
-Channel Details** (section 14b) and **Copy all video URLs** (section 14c), and
-stops **Copy 12 URLs** from exporting scheduled Premieres (section 14a). Avg
-Views and Engagement are unchanged. Live validation was partial; the remaining
-checks were waived by the founder — see [RELEASE_NOTES_v1.2.0.md](RELEASE_NOTES_v1.2.0.md).
-1.1.0 ([RELEASE_NOTES_v1.1.0.md](RELEASE_NOTES_v1.1.0.md)), 1.0.0, 1.0.1 and
+**Version 1.3.0 — STABLE.** Clean one-URL-per-line output for **Copy 12
+URLs** and **Copy all video URLs** (with clickable links where the paste target
+supports them), **Copy all video URLs** on the Shorts, Live and podcast-episode
+pages, and the new **Download all video descriptions** (section 14d). Avg
+Views, Engagement, Copy Channel Details and the 12-video selection are
+unchanged. See [RELEASE_NOTES_v1.3.0.md](RELEASE_NOTES_v1.3.0.md). 1.2.0
+([RELEASE_NOTES_v1.2.0.md](RELEASE_NOTES_v1.2.0.md)), 1.1.0, 1.0.0, 1.0.1 and
 1.0.2 remain archived. Full history in
 [CHANGELOG.md](CHANGELOG.md).
 
@@ -34,8 +35,12 @@ checks were waived by the founder — see [RELEASE_NOTES_v1.2.0.md](RELEASE_NOTE
 - **Copy Channel Details** copies one JSON evidence block — the channel as
   shown on the page plus the same 12 videos with their titles, ages and
   runtimes — for the Creator Evidence Maker.
-- **Copy all video URLs** copies every video URL currently loaded in the
-  Videos grid, in on-page order, on any sort.
+- **Copy all video URLs** copies every video URL currently loaded on a
+  channel's Videos, Shorts or Live tab, or on a podcast/playlist episode list,
+  in on-page order, on any sort.
+- **Download all video descriptions** saves the full public descriptions of
+  those same loaded videos as one UTF-8 `.txt` file (YouTube Data API; keeps
+  running if you leave the page).
 
 ## 2. What it deliberately does NOT do
 
@@ -200,6 +205,7 @@ delays, no evasion behaviour. The only network destination is
 | Permission | Why it is required |
 | --- | --- |
 | `storage` | Save your YouTube API key locally and read it in the service worker, and restrict that storage to trusted contexts. Nothing else is stored. |
+| `downloads` | Save the descriptions `.txt` from the background, so the file is still saved after you leave the YouTube page (v1.3.0). |
 | `host_permissions: https://www.googleapis.com/youtube/v3/*` | The only network destination. Without it the API call is blocked. |
 | `content_scripts` on `https://www.youtube.com/*` | Read the video links already rendered on the channel's Videos tab and draw the two controls. Runs in the top frame only. |
 
@@ -376,11 +382,15 @@ of the 12 newest **published** normal uploads, newest first, in exactly this
 form:
 
 ```
-1. https://www.youtube.com/watch?v=VIDEO_ID_1
-2. https://www.youtube.com/watch?v=VIDEO_ID_2
+https://www.youtube.com/watch?v=VIDEO_ID_1
+https://www.youtube.com/watch?v=VIDEO_ID_2
 ...
-12. https://www.youtube.com/watch?v=VIDEO_ID_12
+https://www.youtube.com/watch?v=VIDEO_ID_12
 ```
+
+One URL per line, nothing else (v1.3.0 removed the numbering). Rich-text
+editors also receive the same lines as clickable links; if a target app
+pastes them oddly, use its *Paste as plain text* (⌘⇧V / Ctrl+Shift+V).
 
 - It is **not** the metric sample. It ignores the 3-month window and every
   sample rule: a creator with 5 recent uploads still gets their newest 12.
@@ -445,23 +455,31 @@ Other labels as Copy 12 URLs, except **Found N of 12 — load/retry** and
 
 ## 14c. Copy all video URLs
 
-Works on the Videos tab on **any sort** (Latest, Popular or Oldest). Scroll as
-far as you want first; the button never scrolls or loads anything. It copies
-every unique video URL in the cards currently loaded in the grid, in on-page
-order:
+Works on a channel's **Videos**, **Shorts** and **Live** tabs on **any sort**
+(Latest, Popular or Oldest), and on a **podcast / playlist episode list**
+(`youtube.com/playlist?list=…`). Scroll as far as you want first; the button
+never scrolls or loads anything. It copies every unique video URL in the cards
+currently loaded, in on-page order:
 
 ```
 Total URLs: 347
 Sort: Oldest
 
-1. https://www.youtube.com/watch?v=VIDEO_ID_1
+https://www.youtube.com/watch?v=VIDEO_ID_1
 ...
-347. https://www.youtube.com/watch?v=VIDEO_ID_347
+https://www.youtube.com/watch?v=VIDEO_ID_347
 ```
 
-- `Total URLs` always equals the number of numbered lines. `Sort` is the active
-  chip, or `Unknown`. For a tool that wants URLs only, delete the first three
-  lines.
+- One URL per line, no numbering. `Total URLs` equals the number of URL lines.
+  `Sort` is the active chip, `Playlist order` on a playlist, or `Unknown`. For
+  a tool that wants URLs only, delete the first three lines.
+- **Shorts** keep their native `https://www.youtube.com/shorts/<ID>` URL. Live
+  and completed streams use `watch?v=` URLs.
+- **Podcasts:** a channel's *Podcasts* tab lists podcasts, which are
+  playlists — the button says *Open a podcast to export its episodes* instead
+  of copying playlist links. Open the podcast; its episode list is supported.
+- Off the Videos tab the Ternary House bar shows only this button and
+  *Download all video descriptions*.
 - **It is what is loaded, not the whole channel.** A channel showing
   "1.1K videos" gives only the cards you scrolled into the page.
 - Unlike Copy 12 URLs, it **includes** scheduled Premiere cards that have a
@@ -476,6 +494,34 @@ Sort: Oldest
 | **N cards not ready — retry** | Some cards are still rendering. Wait a moment. Clipboard untouched. |
 | **Busy — retry** | Another export or the metrics are loading the page. |
 | **Copy failed** | The browser refused the clipboard. Click again. |
+
+## 14d. Download all video descriptions
+
+Available wherever Copy all video URLs is, and uses **exactly the same loaded
+videos**. Click once: the list is captured at that moment, and the extension's
+background worker fetches each video's public description with the YouTube Data
+API (`videos.list`, 50 videos per request, your saved API key) and saves one
+UTF-8 file:
+
+`CHANNEL-TAB-video-descriptions-YYYY-MM-DD.txt` (e.g.
+`PaulJLipsky-shorts-video-descriptions-2026-10-31.txt`)
+
+- You can scroll, leave the page or switch tabs; the file is still saved. The
+  button shows progress (`Descriptions 150/700…`) and the result
+  (`Downloaded 700 (2 missing)`); hover for details. A second click while a
+  download is running shows *Already running*.
+- The file starts with a header and a **`# MISSING`** section listing every
+  video whose description could not be retrieved (title, URL, ID, reason),
+  then one record per video in page order, separated by a line of 125 dashes.
+  Descriptions are copied exactly as the API returns them; each record states
+  the description's length so a program never has to guess where it ends.
+- Every loaded video gets a record, including upcoming Premieres, empty
+  descriptions and unavailable/private/deleted videos.
+- No API key, an invalid key or an exhausted quota with nothing retrieved
+  produces **no file** and a clear message instead of an empty export. Each
+  request costs 1 quota unit (700 videos = 14 units).
+- If Chrome is closed before it finishes, the button shows
+  *Interrupted — click to retry*; nothing is downloaded later without you.
 
 ## 15. Troubleshooting
 
@@ -701,13 +747,13 @@ No test framework and no npm install. With Node:
 npm test
 ```
 
-which runs all six suites with Node. Or with Deno:
+which runs all seven suites with Node. Or with Deno:
 
 ```bash
-for t in calculations youtube-api clipboard url-export video-selection channel-details; do deno run --allow-read tests/$t.test.mjs; done
+for t in calculations youtube-api clipboard url-export video-selection channel-details descriptions; do deno run --allow-read tests/$t.test.mjs; done
 ```
 
-232 tests in six suites (1.2.0 candidate). The calculation and API suites (75) cover the trimmed average (including duplicate and all-equal extremes),
+265 tests in seven suites (1.3.0). The calculation and API suites (75) cover the trimmed average (including duplicate and all-equal extremes),
 small-sample and insufficient-sample states, hidden statistics, the per-video ER
 formula, both aggregations and the fact that they differ, calendar-month cutoff
 boundaries, duration parsing, long-form eligibility, completed-Premiere
@@ -741,6 +787,10 @@ content/url-export.js          Export operations for Copy 12 URLs / Channel
                                Details (bounded top-up, Ready fallback) and
                                Copy all video URLs; formatting; DOM lock.
 content/channel-details.js     Channel-header reader + JSON evidence block.
+lib/descriptions.js            Description retrieval (batched videos.list) and
+                               the descriptions .txt format.
+background/description-jobs.js Background description job: persistent state,
+                               duplicate guard, resume, download.
                                None of the three: no API, no key, no network.
 content/content.js             DOM discovery + UI state (never sees the key)
                                Two shadow hosts: the compact bar in the channel

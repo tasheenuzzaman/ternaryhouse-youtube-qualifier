@@ -8,6 +8,7 @@
 
 import { fetchVideoStatistics, testApiKey, YouTubeApiError } from '../lib/youtube-api.js';
 import { analyzeVideos } from '../lib/analysis.js';
+import { createDescriptionJobs } from './description-jobs.js';
 import {
   API_KEY_STORAGE_KEY,
   ACCESS_LEVEL_TRUSTED,
@@ -200,7 +201,18 @@ async function handleSecurityStatus() {
   };
 }
 
+/* ------------------------------------------------------------------ *
+ * Download all video descriptions (background/description-jobs.js)
+ * ------------------------------------------------------------------ */
+
+const descriptionJobs = createDescriptionJobs({ chrome, readApiKey });
+// Every wake: continue a job this browser session started, or mark one from
+// a closed browser session as interrupted.
+lockdownReady.then(() => descriptionJobs.resume()).catch(() => {});
+
 const HANDLERS = {
+  DESCRIPTIONS_START: (payload) => descriptionJobs.start(payload),
+  DESCRIPTIONS_STATUS: () => descriptionJobs.status(),
   ANALYZE: handleAnalyze,
   KEY_STATUS: handleKeyStatus,
   TEST_KEY: handleTestKey,

@@ -368,6 +368,32 @@ test('I. a throwing fallback still resolves false', async () => {
   equal(ok, false, 'no exception escapes');
 });
 
+group('v1.3.0 RICH CLIPBOARD (copyRich)');
+
+test('Q1. plain text + text/html in one clipboard write when supported', async () => {
+  const writes = [];
+  globalThis.ClipboardItem = class { constructor(map) { this.map = map; } };
+  globalThis.Blob = globalThis.Blob || class {};
+  const { api } = loadRender({ clipboard: { async write(items) { writes.push(items); }, async writeText() { throw new Error('should not be used'); } } });
+  equal(await api.copyRich('https://www.youtube.com/watch?v=AAAAAAAAAAA', '<div><a href="x">x</a></div>'), true, 'ok');
+  equal(writes.length, 1, 'one write');
+  equal(Object.keys(writes[0][0].map).join(','), 'text/plain,text/html', 'both types');
+  delete globalThis.ClipboardItem;
+});
+
+test('Q2. rich write refused or unavailable: falls back to the ordinary plain-text copy', async () => {
+  globalThis.ClipboardItem = class { constructor(map) { this.map = map; } };
+  const plain = [];
+  const refused = loadRender({ clipboard: { async write() { throw new Error('denied'); }, async writeText(t) { plain.push(t); } } }).api;
+  equal(await refused.copyRich('T', '<b>T</b>'), true, 'plain fallback succeeded');
+  equal(plain.join(), 'T', 'plain text written');
+  delete globalThis.ClipboardItem;
+  const noApi = loadRender({ clipboard: { async writeText(t) { plain.push(t); } } }).api;
+  equal(await noApi.copyRich('U', '<b>U</b>'), true, 'no ClipboardItem: plain');
+  equal(await noApi.copyRich('V', null), true, 'no html: plain');
+  equal(plain.join(), 'T,U,V', 'all plain');
+});
+
 /* ------------------------------------------------------------------ */
 
 for (const item of queue) {

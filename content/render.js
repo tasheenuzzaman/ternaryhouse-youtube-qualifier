@@ -59,6 +59,26 @@ async function copyText(text) {
   }
 }
 
+/**
+ * Plain text plus a text/html companion (clickable links). Plain text is the
+ * dependable part: if the rich write is unavailable or refused, the ordinary
+ * copyText() path runs instead, so a link-free paste is never lost.
+ */
+async function copyRich(text, html) {
+  if (html && typeof ClipboardItem === 'function' && navigator.clipboard && typeof navigator.clipboard.write === 'function') {
+    try {
+      await navigator.clipboard.write([new ClipboardItem({
+        'text/plain': new Blob([text], { type: 'text/plain' }),
+        'text/html': new Blob([html], { type: 'text/html' }),
+      })]);
+      return true;
+    } catch {
+      // fall through to plain text
+    }
+  }
+  return copyText(text);
+}
+
 /* ================================================================== *
  * UI
  * ================================================================== */
@@ -505,7 +525,7 @@ const kv = (label, value) => [el('dt', { text: label }), el('dd', { text: value 
     renderAvgViewsPanel, renderEngagementPanel, renderErrorPanel,
     // copyText was defined here but never exported, so every caller in
     // content.js hit a ReferenceError. See CHANGELOG 1.0.2.
-    copyText, bindCopyControl, copyFeedback,
+    copyText, copyRich, bindCopyControl, copyFeedback,
     compactAvgViewsText, compactCopyValue, LOADING_TEXT, ERROR_TEXT,
   };
 })();

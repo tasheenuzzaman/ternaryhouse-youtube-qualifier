@@ -15,6 +15,7 @@ import { loadContentScripts, createHarness, assert, equal, sourceOf } from './he
 import {
   STATUS, publishedAt, modernCard, legacyRichCard, legacyGridCard, shortsCard, unrenderedCard, playlistCard, grid,
   realLockupCard, realStampSpan, REAL_PUBLISHED, REAL_SCHEDULED, tvMisericordiaShape,
+  shortsTabCard, playlistVideoCard, playlistGrid,
 } from './fixtures/youtube-markup.mjs';
 
 const { VS, X } = loadContentScripts();
@@ -489,10 +490,10 @@ function parseAllUrls(text) {
   const sort = /^Sort: (Latest|Popular|Oldest|Unknown)$/.exec(lines[1]);
   assert(total && sort && lines[2] === '', `header: ${JSON.stringify(lines.slice(0, 3))}`);
   const urls = lines.slice(3).map((line, i) => {
-    const m = /^(\d+)\. (https:\/\/www\.youtube\.com\/watch\?v=[A-Za-z0-9_-]{11})$/.exec(line);
+    // v1.3.0: one URL per line, no numbering, nothing else.
+    const m = /^(https:\/\/www\.youtube\.com\/(?:watch\?v=|shorts\/)[A-Za-z0-9_-]{11})$/.exec(line);
     assert(m, `line ${i + 4}: ${JSON.stringify(line)}`);
-    equal(Number(m[1]), i + 1, `numbering at line ${i + 4}`);
-    return m[2];
+    return m[1];
   });
   equal(Number(total[1]), urls.length, 'Total URLs equals the numbered lines');
   equal(new Set(urls).size, urls.length, 'unique');
@@ -542,7 +543,7 @@ test('U2. 12, 60, 120 and 1,100 loaded cards: every one, no 12/60 cap, no loadin
     equal(parsed.urls[n - 1], url(vid(10000 + n - 1)), `${n}: last card present`);
     equal(env.reads, 1, `${n}: one snapshot`);
   }
-  equal(X.formatAllUrlsBlock([vid(1)], 'Latest'), `Total URLs: 1\nSort: Latest\n\n1. ${url(vid(1))}`, 'exact format');
+  equal(X.formatAllUrlsBlock([vid(1)], 'Latest'), `Total URLs: 1\nSort: Latest\n\n${url(vid(1))}`, 'exact format');
   equal(X.allUrlsButtonText({ status: 'COPIED', count: 1 }), 'Copied 1 URL', 'singular');
 });
 
@@ -778,11 +779,105 @@ test('RY8. Copy all video URLs on the same page: all 15, Premieres included, gri
   equal(parsed.urls.join(','), shape.map((c) => url(c.id)).join(','), 'grid order, Premieres at 3, 4, 5');
 });
 
+group('v1.3.0 INVENTORY SURFACES (simulated markup)');
+
+const listOf = (cardsHtml) => parseHTML(playlistGrid(cardsHtml.join(''))).children[0];
+
+test('V1. Shorts tab: native /shorts/<ID> URLs, card order, titles; Videos-tab rule unchanged', async () => {
+  const ids = [vid(20001), vid(20002), vid(20003)];
+  const cards = ids.map((id, i) => shortsTabCard({ id, title: `Short ${i} — „ą”` }));
+  const inv = X.readLoadedVideoUrls(gridOf(cards), { allowShorts: true });
+  equal(inv.entries.map((e) => `${e.id}:${e.kind}`).join(','), ids.map((id) => `${id}:shorts`).join(','), 'entries');
+  equal(inv.entries[1].title, 'Short 1 — „ą”', 'title from the card');
+  equal(X.formatAllUrlsBlock(inv.entries, 'Popular'), `Total URLs: 3\nSort: Popular\n\n${ids.map((id) => `https://www.youtube.com/shorts/${id}`).join('\n')}`, 'block');
+  const videosTab = X.readLoadedVideoUrls(gridOf(cards));
+  equal(`${videosTab.ids.length}/${videosTab.shorts}`, '0/3', 'without allowShorts, Shorts cards are still skipped');
+  equal(VS.shortsIdFromHref('/shorts/abc'), null, 'invalid Short ID');
+  equal(VS.shortsIdFromHref('https://evil.example/shorts/AAAAAAAAAAA'), null, 'foreign host');
+});
+
+test('V2. Live tab: completed and upcoming stream cards keep canonical watch URLs', () => {
+  const cards = [
+    modernCard({ id: vid(21001), title: 'Live now', ...STATUS.live }),
+    modernCard({ id: vid(21002), title: 'Upcoming', badge: 'UPCOMING', meta: ['Scheduled for 11/2/26, 6:00 PM'], button: 'Notify me' }),
+    modernCard({ id: vid(21003), title: 'Past stream', ...STATUS.completedStream }),
+  ];
+  const inv = X.readLoadedVideoUrls(gridOf(cards), { allowShorts: false });
+  equal(inv.entries.map((e) => e.id).join(','), [vid(21001), vid(21002), vid(21003)].join(','), 'all three, page order');
+  assert(inv.entries.every((e) => e.kind === 'watch'), 'watch URLs');
+});
+
+test('V3. Podcast episode list (playlist page): episodes, &list= stripped, order and duplicates', () => {
+  const ids = [vid(22001), vid(22002), vid(22003)];
+  const cards = [...ids.map((id, i) => playlistVideoCard({ id, title: `Episode ${i + 1}`, index: i + 1 })), playlistVideoCard({ id: ids[0], index: 4 })];
+  const inv = X.readLoadedVideoUrls(listOf(cards));
+  equal(inv.entries.map((e) => e.id).join(','), ids.join(','), 'episodes in list order');
+  equal(inv.duplicates, 1, 'a repeated episode counted once');
+  equal(inv.entries[2].title, 'Episode 3', 'title');
+  const text = X.formatAllUrlsBlock(inv.entries, 'Playlist order');
+  assert(text.startsWith('Total URLs: 3\nSort: Playlist order\n\n') && !text.includes('list='), text);
+});
+
+test('V4. Podcasts tab: playlist tiles are never reported as videos', async () => {
+  const env = allEnv({ cards: [playlistCard({ list: 'PLaaaaaaaaaaaaaaaa' }), playlistCard({ list: 'PLbbbbbbbbbbbbbbbb' })] });
+  const result = await env.exporter.click();
+  equal(result.status, 'NONE', 'nothing exported');
+  equal(result.nonVideo, 2, 'reason available for the operator message');
+  equal(env.copies.length, 0, 'clipboard untouched');
+});
+
+test('V5. a card nested inside another matched card is one card', () => {
+  const nested = `<ytd-rich-item-renderer><div><ytd-reel-item-renderer><a href="/shorts/${vid(23001)}">x</a><h3><a href="/shorts/${vid(23001)}" title="N">N</a></h3></ytd-reel-item-renderer></div></ytd-rich-item-renderer>`;
+  const inv = X.readLoadedVideoUrls(gridOf([nested]), { allowShorts: true });
+  equal(`${inv.cardCount}/${inv.entries.length}/${inv.duplicates}`, '1/1/0', 'counted once');
+});
+
+test('V6. 700 loaded cards: 700 unique URLs, no cap, one line each', async () => {
+  const cards = Array.from({ length: 700 }, (_, i) => legacyGridCard({ id: vid(30000 + i), title: `v${i}` }));
+  const env = allEnv({ cards });
+  const result = await env.exporter.click();
+  equal(result.count, 700, 'count');
+  const parsed = parseAllUrls(env.copies[0]);
+  equal(parsed.urls.length, 700, 'lines');
+  equal(parsed.urls[699], url(vid(30699)), 'last card');
+});
+
+test('V7. Copy 12 URLs and Copy all video URLs: clean lines, no numbering, no trailing spaces; rich links match', async () => {
+  const twelve = X.formatExportBlock(Array.from({ length: 12 }, (_, i) => vid(40000 + i)));
+  for (const line of twelve.split('\n')) assert(/^https:\/\/www\.youtube\.com\/watch\?v=[A-Za-z0-9_-]{11}$/.test(line), `clean: ${JSON.stringify(line)}`);
+  const html = X.linksHtml(twelve);
+  equal((html.match(/<a href=/g) || []).length, 12, '12 links');
+  equal(html.replace(/<div><br><\/div>/g, '\n').replace(/<\/div>/g, '\n').replace(/<[^>]+>/g, '').trim(), twelve, 'visible text equals the plain text');
+  const block = X.formatAllUrlsBlock([vid(1), vid(2)], 'Latest');
+  const h2 = X.linksHtml(block);
+  assert(h2.startsWith('<div>Total URLs: 2</div><div>Sort: Latest</div><div><br></div><div><a href='), h2.slice(0, 120));
+  assert(!X.linksHtml('1. <script>').includes('<script>'), 'escaped');
+});
+
+test('V8. Download all video descriptions: same inventory, same refusals, snapshot handed over once', async () => {
+  const sent = [];
+  const make = (inv, start = async (snap) => { sent.push(snap); return { ok: true, job: { state: 'running', processed: 0, total: snap.items.length } }; }) => X.createDescriptionsExporter({
+    isAlive: () => true, onVideosRoute: () => true, isBusy: () => false,
+    readInventory: () => inv, readContext: () => ({ tab: 'shorts', tabLabel: 'Shorts', sort: 'Latest', channelName: 'C' }), start,
+  });
+  const inv = X.readLoadedVideoUrls(gridOf([shortsTabCard({ id: vid(50001) }), shortsTabCard({ id: vid(50002) })]), { allowShorts: true });
+  const r = await make(inv).click();
+  equal(r.status, 'STARTED', 'started');
+  equal(sent[0].items.map((i) => `${i.id}:${i.kind}`).join(','), `${vid(50001)}:shorts,${vid(50002)}:shorts`, 'the same entries Copy all video URLs uses');
+  assert(Number.isFinite(sent[0].capturedAt) && sent[0].tab === 'shorts', 'context and click time');
+  equal((await make(X.readLoadedVideoUrls(gridOf([modernCard({ id: vid(1), title: 'x' }), unrenderedCard()]))).click()).status, 'NOT_READY', 'unrendered card refuses');
+  equal((await make(X.readLoadedVideoUrls(gridOf([playlistCard()]))).click()).status, 'NONE', 'no videos');
+  const busy = await make(inv, async () => ({ ok: false, error: { code: 'BUSY', message: 'A description download is already running.' }, job: { processed: 3, total: 9 } })).click();
+  equal(X.descriptionsButtonText(busy), 'Already running 3/9', 'duplicate job label');
+  equal(X.descriptionsJobText({ state: 'done', total: 200, counts: { total: 200, missing: 2 } }), 'Downloaded 200 (2 missing)', 'done label');
+  equal(X.descriptionsJobText({ state: 'failed', error: { code: 'NO_API_KEY' } }), 'API key required', 'key label');
+});
+
 group('ISOLATION');
 
-test('S1. no new permissions; content scripts load in dependency order', () => {
+test('S1. permissions are exactly storage + downloads (v1.3.0); content scripts load in dependency order', () => {
   const manifest = JSON.parse(sourceOf('manifest.json'));
-  equal(JSON.stringify(manifest.permissions), JSON.stringify(['storage']), 'permissions');
+  equal(JSON.stringify(manifest.permissions), JSON.stringify(['storage', 'downloads']), 'permissions');
   equal(JSON.stringify(manifest.host_permissions), JSON.stringify(['https://www.googleapis.com/youtube/v3/*']), 'host permissions');
   equal(manifest.content_scripts[0].js.join(','),
     'content/render.js,content/video-selection.js,content/url-export.js,content/channel-details.js,content/content.js', 'load order');

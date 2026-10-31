@@ -386,7 +386,7 @@ test('B1. FinTaxPro-shaped page: Copy 12 URLs and Copy Channel Details agree pos
   equal(lines.length, 12, 'URL output still exactly 12 numbered lines');
   const json = JSON.parse(page.copies[1]);
   lines.forEach((line, i) => {
-    equal(line, `${i + 1}. ${json.sample.videos[i].video_url}`, `position ${i + 1} identical`);
+    equal(line, json.sample.videos[i].video_url, `position ${i + 1} identical`);
   });
   assert(!page.copies[0].includes(vid(911)) && !page.copies[0].includes(vid(912)), 'scheduled not in the URL block');
   assert(!json.sample.videos.some((v) => v.video_id === vid(911) || v.video_id === vid(912)), 'scheduled not in the details sample');
@@ -515,7 +515,7 @@ test('B9. real-pattern page (TvMisericordiaPL shape): both Latest exports agree;
   const expected = shape.filter((c) => !c.scheduled).map((c) => c.id);
   equal(lines.length, 12, 'still exactly 12 numbered lines');
   lines.forEach((line, i) => {
-    equal(line, `${i + 1}. https://www.youtube.com/watch?v=${expected[i]}`, `URL line ${i + 1}`);
+    equal(line, `https://www.youtube.com/watch?v=${expected[i]}`, `URL line ${i + 1}`);
     equal(json.sample.videos[i].video_id, expected[i], `JSON position ${i + 1}`);
   });
   equal(json.sample.videos[0].published_text, '2 hours ago', 'published_text from the label');

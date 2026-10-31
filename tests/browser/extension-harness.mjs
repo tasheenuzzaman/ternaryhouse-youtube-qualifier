@@ -29,7 +29,12 @@ import { loadContentScripts } from '../helpers/load-content.mjs';
 import {
   STATUS, publishedAt, modernCard, legacyRichCard, modernHeader, legacyHeader, channelPage, grid,
   realLockupCard, REAL_PUBLISHED, REAL_SCHEDULED, tvMisericordiaShape,
+  shortsTabCard, playlistVideoCard, playlistGrid, playlistCard,
 } from '../fixtures/youtube-markup.mjs';
+
+// Lets context.route() see the extension service worker's own requests, so
+// the YouTube Data API can be mocked for the description download.
+process.env.PW_EXPERIMENTAL_SERVICE_WORKER_NETWORK_EVENTS = '1';
 
 const require = createRequire(import.meta.url);
 let chromium;
@@ -164,6 +169,42 @@ function fixtureData(handle) {
   return { name: ch.name, cards: pops, initial: ch.initial, browse };
 }
 
+/* v1.3.0 surfaces: static simulated pages (no page script needed). */
+const shortsIds = [vid(60001), vid(60002), vid(60003)];
+const streamCards = [
+  modernCard({ id: vid(61001), title: 'Live now', ...STATUS.live }),
+  modernCard({ id: vid(61002), title: 'Upcoming stream', badge: 'UPCOMING', meta: ['Scheduled for 11/2/26, 6:00 PM'], button: 'Notify me' }),
+  modernCard({ id: vid(61003), title: 'Past stream', ...STATUS.completedStream }),
+];
+const episodeIds = [vid(62001), vid(62002), vid(62003), vid(62004)];
+function staticPage(title, body) {
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${title} - YouTube</title><style>${CSS}</style></head><body>${body}</body></html>`;
+}
+function surfaceHtml(handle, tab) {
+  const header = CHANNELS[handle].header();
+  if (tab === 'shorts') return staticPage(CHANNELS[handle].name, channelPage({ header, cards: shortsIds.map((id, i) => shortsTabCard({ id, title: `Short ${i} ✨` })).join('') }));
+  if (tab === 'streams') return staticPage(CHANNELS[handle].name, channelPage({ header, cards: streamCards.join('') }));
+  if (tab === 'podcasts') return staticPage(CHANNELS[handle].name, channelPage({ header, cards: [playlistCard({ list: 'PLpodcastAAAAAAAAA' }), playlistCard({ list: 'PLpodcastBBBBBBBBB' })].join('') }));
+  return null;
+}
+function playlistHtml() {
+  const rows = episodeIds.map((id, i) => playlistVideoCard({ id, title: `Episode ${i + 1} — الحلقة`, index: i + 1 })).join('');
+  return staticPage('Fixture Podcast', `<ytd-app><ytd-page-manager><ytd-browse page-subtype="playlist"><yt-page-header-renderer><h1><span>Fixture Podcast</span></h1><a href="/@AbutaymiyyahMJ"><span>Abu Taymiyyah</span></a></yt-page-header-renderer><ytd-two-column-browse-results-renderer><div id="primary">${playlistGrid(rows)}</div></ytd-two-column-browse-results-renderer></ytd-browse></ytd-page-manager></ytd-app>`);
+}
+
+/* Mock YouTube Data API (videos.list?part=snippet) for the description job. */
+const API_KEY = 'TESTKEY-harness-only-0001';
+const MISSING_ID = vid(1005);
+const apiCalls = [];
+function mockApi(u) {
+  const ids = (u.searchParams.get('id') || '').split(',');
+  apiCalls.push({ part: u.searchParams.get('part'), ids, keyOk: u.searchParams.get('key') === API_KEY });
+  const items = ids.filter((id) => id !== MISSING_ID).reverse().map((id) => ({
+    id, snippet: { title: `API title ${id}`, description: `Описание ${id}\n\nSponsor: use code SAVE20 → https://example.com/?a=1&b=2\n${'-'.repeat(125)}\n00:00 Intro`, publishedAt: '2026-10-01T12:00:00Z', liveBroadcastContent: 'none' },
+  }));
+  return { status: 200, contentType: 'application/json', body: JSON.stringify({ items }) };
+}
+
 function pageHtml(handle) {
   const data = fixtureData(handle);
   // Only the SPA targets are embedded, to keep pages small.
@@ -193,6 +234,7 @@ const context = await chromium.launchPersistentContext(profile, {
   channel: 'chromium',
   headless: true,
   viewport: { width: 1280, height: 900 },
+  acceptDownloads: true,
   args: [`--disable-extensions-except=${EXT}`, `--load-extension=${EXT}`],
 });
 
@@ -201,8 +243,14 @@ try {
   await context.route('**/*', (route) => {
     const u = new URL(route.request().url());
     requests.push(u.href);
+    if (u.hostname === 'www.googleapis.com' && u.pathname === '/youtube/v3/videos') {
+      return new Promise((r) => setTimeout(r, 1200)).then(() => route.fulfill(mockApi(u)));
+    }
     if (u.hostname === 'www.youtube.com') {
-      const handle = u.pathname.split('/')[1];
+      if (u.pathname === '/playlist') return route.fulfill({ contentType: 'text/html; charset=utf-8', body: playlistHtml() });
+      const [, handle, tab] = u.pathname.split('/');
+      const surface = CHANNELS[handle] && surfaceHtml(handle, tab);
+      if (surface) return route.fulfill({ contentType: 'text/html; charset=utf-8', body: surface });
       if (CHANNELS[handle]) return route.fulfill({ contentType: 'text/html; charset=utf-8', body: pageHtml(handle) });
       return route.fulfill({ status: 404, body: 'not a fixture' });
     }
@@ -236,8 +284,8 @@ try {
   await bar().first().waitFor({ state: 'attached', timeout: 15000 });
   const barText = (await bar().locator('.bar').first().innerText()).replace(/\s+/g, ' ').trim();
   check('one bar mounted', (await bar().count()) === 1, `count=${await bar().count()}`);
-  check('bar order: TH | Avg Views | Engagement | Copy 12 URLs | Copy Channel Details | Copy all video URLs | ⟳',
-    /^TH Avg Views Engagement Copy 12 URLs Copy Channel Details Copy all video URLs ⟳/.test(barText), barText);
+  check('bar order: TH | Avg Views | Engagement | Copy 12 URLs | Copy Channel Details | Copy all video URLs | Download all video descriptions | ⟳',
+    /^TH Avg Views Engagement Copy 12 URLs Copy Channel Details Copy all video URLs Download all video descriptions ⟳/.test(barText), barText);
   check('bar lives in the extension Shadow DOM, not in the sort chips',
     await page.evaluate(() => !document.querySelector('chip-bar-view-model .thq-host') && Boolean(document.querySelector('.thq-bar-host').shadowRoot)));
 
@@ -246,7 +294,7 @@ try {
   const l12 = await clickExport(0, DONE);
   const block = await clip();
   const lines = block.split('\n');
-  const expected12 = Array.from({ length: 12 }, (_, i) => `${i + 1}. ${wurl(vid(1000 + i))}`);
+  const expected12 = Array.from({ length: 12 }, (_, i) => wurl(vid(1000 + i)));
   check('Copy 12 URLs label', l12 === 'Copied 12 URLs', l12);
   check('Copy 12 URLs: exactly the 12 published, scheduled skipped', block === expected12.join('\n'), lines[0]);
   check('skip notice shown', /Skipped 2 upcoming\/live/.test(await bar().locator('.toast').innerText()));
@@ -259,7 +307,7 @@ try {
   check('details: strict JSON', json !== null);
   if (json) {
     check('details: same 12 IDs, same positions as Copy 12 URLs',
-      json.sample.videos.map((v, i) => `${i + 1}. ${v.video_url}`).join('\n') === block);
+      json.sample.videos.map((v) => v.video_url).join('\n') === block);
     check('details: channel identity from the page',
       json.channel.channel_name === 'Fixture Tax Pro' && json.channel.channel_handle === '@FixtureTax'
       && json.channel.channel_url === 'https://www.youtube.com/@FixtureTax', JSON.stringify(json.channel).slice(0, 120));
@@ -269,7 +317,7 @@ try {
       && json.channel_more_info.video_count_text === '312 videos');
     check('details: Unicode/quotes title intact', json.sample.videos[0].title === 'Video 1000 — “quotes” & ভিডিও', json.sample.videos[0].title);
     check('details: scheduled listed only as excluded', json.sample.excluded_not_in_sample.map((x) => x.video_id).join(',') === `${vid(911)},${vid(912)}`);
-    check('details: tool version is the candidate build', json.source.tool_version === '1.2.0', json.source.tool_version);
+    check('details: tool version is the candidate build', json.source.tool_version === '1.3.0', json.source.tool_version);
     check('details: captured_at has a timezone offset', /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d$/.test(json.captured_at), json.captured_at);
   }
 
@@ -279,7 +327,7 @@ try {
   const all = (await clip()).split('\n');
   check('all URLs label shows the true count', la === 'Copied 30 URLs', la);
   check('all URLs header', all[0] === 'Total URLs: 30' && all[1] === 'Sort: Latest' && all[2] === '', all.slice(0, 2).join(' | '));
-  check('all URLs includes the scheduled Premieres at their card positions', all[3] === `1. ${wurl(vid(911))}` && all[4] === `2. ${wurl(vid(912))}`);
+  check('all URLs includes the scheduled Premieres at their card positions', all[3] === wurl(vid(911)) && all[4] === wurl(vid(912)));
   check('all URLs did not scroll the page', (await page.evaluate(() => window.scrollY)) === scrollBefore);
 
   await page.click('chip-bar-view-model button[role="tab"] >> nth=2'); // Oldest
@@ -287,14 +335,14 @@ try {
   const lo = await clickExport(2, DONE);
   const oldest = (await clip()).split('\n');
   check('Oldest: copied without a sort guard', lo === 'Copied 30 URLs', lo);
-  check('Oldest: Sort line and DOM order', oldest[1] === 'Sort: Oldest' && oldest[3] === `1. ${wurl(vid(1087))}`, `${oldest[1]} | ${oldest[3]}`);
+  check('Oldest: Sort line and DOM order', oldest[1] === 'Sort: Oldest' && oldest[3] === wurl(vid(1087)), `${oldest[1]} | ${oldest[3]}`);
 
   await page.click('chip-bar-view-model button[role="tab"] >> nth=1'); // Popular
   await sleep(100);
   await clickExport(2, DONE);
   const popular = (await clip()).split('\n');
   const domFirst = await page.evaluate(() => document.querySelector('ytd-rich-item-renderer a[href*="/watch?v="]').getAttribute('href'));
-  check('Popular: Sort line and DOM order', popular[1] === 'Sort: Popular' && popular[3] === `1. https://www.youtube.com${domFirst}`, popular[3]);
+  check('Popular: Sort line and DOM order', popular[1] === 'Sort: Popular' && popular[3] === `https://www.youtube.com${domFirst}`, popular[3]);
 
   await setClip('SENTINEL');
   const lp = await clickExport(0, DONE);
@@ -328,7 +376,7 @@ try {
   await page.goto('https://www.youtube.com/@TvMisericordiaPL/videos');
   await bar().first().waitFor({ state: 'attached', timeout: 15000 });
   const realShape = tvMisericordiaShape();
-  const realExpected = realShape.filter((c) => !c.scheduled).map((c, i) => `${i + 1}. ${wurl(c.id)}`).join('\n');
+  const realExpected = realShape.filter((c) => !c.scheduled).map((c) => wurl(c.id)).join('\n');
   const r12 = await clickExport(0, DONE);
   const realBlock = await clip();
   check('real patterns: Copy 12 URLs copies (was "Review video status")', r12 === 'Copied 12 URLs', r12);
@@ -337,7 +385,7 @@ try {
   const realJson = JSON.parse(await clip());
   check('real patterns: Copy Channel Details copies', rd === 'Copied channel details', rd);
   check('real patterns: both exports agree position by position',
-    realJson.sample.videos.map((v, i) => `${i + 1}. ${v.video_url}`).join('\n') === realBlock);
+    realJson.sample.videos.map((v) => v.video_url).join('\n') === realBlock);
   check('real patterns: age from the accessible label, source recorded',
     realJson.sample.videos[0].published_text === '2 hours ago' && realJson.sample.videos[0].published_text_source === 'ACCESSIBLE_LABEL');
   check('description: a second rendering in the page is recorded once, line break kept',
@@ -349,7 +397,7 @@ try {
   const ra = await clickExport(2, DONE);
   const realAll = (await clip()).split('\n');
   check('real patterns: Copy all video URLs keeps all 15, Premieres included in grid order',
-    ra === 'Copied 15 URLs' && realAll.slice(3).join('\n') === realShape.map((c, i) => `${i + 1}. ${wurl(c.id)}`).join('\n'), ra);
+    ra === 'Copied 15 URLs' && realAll.slice(3).join('\n') === realShape.map((c) => wurl(c.id)).join('\n'), ra);
 
   console.log('\nSPA NAVIGATION');
   await page.goto('https://www.youtube.com/@FixtureTax/videos');
@@ -372,7 +420,7 @@ try {
   const thousandMs = Date.now() - t0;
   const thousand = (await clip()).split('\n');
   check('1,000 cards: all exported, no cap', lt === 'Copied 1000 URLs' && thousand[0] === 'Total URLs: 1000' && thousand.length === 1003, lt);
-  check('1,000 cards: numbering 1..1000 in DOM order', thousand[1002] === `1000. ${wurl(vid(10999))}`);
+  check('1,000 cards: one unnumbered URL per line, DOM order', thousand[1002] === wurl(vid(10999)) && thousand[3] === wurl(vid(10000)));
   const readMs = await page.evaluate((src) => {
     const s = {};
     new Function('self', src)(s); // eslint-disable-line no-new-func
@@ -460,9 +508,89 @@ try {
   });
   check('Avg Views reports the missing key; exports did not need one', /API key/i.test(panel), panel.slice(0, 160));
 
+
+  console.log('\nv1.3.0 SURFACES: SHORTS, LIVE, PODCASTS, PLAYLIST EPISODES');
+  const inventoryBar = async (url) => {
+    await page.goto(url);
+    await bar().first().waitFor({ state: 'attached', timeout: 15000 });
+    return (await bar().locator('.bar').first().innerText()).replace(/\s+/g, ' ').trim();
+  };
+  const sbar = await inventoryBar('https://www.youtube.com/@FixtureTax/shorts');
+  check('Shorts tab: reduced bar (no metrics, no 12-video exports)', /^TH Copy all video URLs Download all video descriptions$/.test(sbar), sbar);
+  const lsh = await clickExport(0, DONE);
+  check('Shorts tab: native /shorts/ URLs in card order', lsh === 'Copied 3 URLs' && (await clip()) === `Total URLs: 3\nSort: Latest\n\n${shortsIds.map((id) => `https://www.youtube.com/shorts/${id}`).join('\n')}`, lsh);
+  const rich = await page.evaluate(async () => {
+    const [item] = await navigator.clipboard.read();
+    return item.types.includes('text/html') ? (await (await item.getType('text/html')).text()) : '';
+  });
+  check('rich clipboard: text/html with clickable links alongside plain text', (rich.match(/<a href="https:\/\/www\.youtube\.com\/shorts\//g) || []).length === 3, rich.slice(0, 90));
+  await inventoryBar('https://www.youtube.com/@FixtureTax/streams');
+  const lst = await clickExport(0, DONE);
+  check('Live tab: live, upcoming and completed streams, watch URLs', lst === 'Copied 3 URLs' && (await clip()).endsWith([vid(61001), vid(61002), vid(61003)].map(wurl).join('\n')), lst);
+  await inventoryBar('https://www.youtube.com/@FixtureTax/podcasts');
+  await setClip('SENTINEL');
+  const lp2 = await clickExport(0, /^(Open a podcast|Copied|No loaded)/);
+  check('Podcasts tab: playlist tiles are not passed off as videos', lp2 === 'Open a podcast to export its episodes' && (await clip()) === 'SENTINEL', lp2);
+  const pbar = await inventoryBar('https://www.youtube.com/playlist?list=PLpodcastAAAAAAAAA');
+  const lpl = await clickExport(0, DONE);
+  check('Podcast episode list (playlist page): episodes, playlist order, &list= stripped', /Copy all video URLs Download all video descriptions/.test(pbar)
+    && lpl === 'Copied 4 URLs' && (await clip()) === `Total URLs: 4\nSort: Playlist order\n\n${episodeIds.map(wurl).join('\n')}`, lpl);
+
+  console.log('\nv1.3.0 DOWNLOAD ALL VIDEO DESCRIPTIONS (mocked YouTube Data API)');
+  const sw = context.serviceWorkers()[0] || await context.waitForEvent('serviceworker');
+  await sw.evaluate((k) => chrome.storage.local.set({ youtubeApiKey: k }), API_KEY);
+  const jobState = () => sw.evaluate(async () => (await chrome.storage.local.get('descriptionJob')).descriptionJob);
+  const waitJob = async (pred, ms = 30000) => {
+    const end = Date.now() + ms;
+    let j;
+    while (Date.now() < end) { j = await jobState(); if (j && pred(j)) return j; await sleep(200); }
+    return j;
+  };
+  // Playwright stores downloads under GUID paths, so the file is found by the
+  // job's download id; the requested name is checked on the job record.
+  const savedFile = (j, nameRe) => (j && typeof j.downloadId === 'number' && nameRe.test(j.filename || '')
+    ? sw.evaluate((id) => new Promise((res) => chrome.downloads.search({ id }, (all) => res(all.map((d) => ({ id: d.id, state: d.state, filename: d.filename }))))), j.downloadId)
+    : Promise.resolve([]));
+
+  await page.goto('https://www.youtube.com/@FixtureTax/videos');
+  await bar().first().waitFor({ state: 'attached', timeout: 15000 });
+  const pageOrder = await page.evaluate(() => [...document.querySelectorAll('ytd-rich-item-renderer a[href*="/watch?v="]')].map((a) => new URL(a.href).searchParams.get('v')).filter((v, i, arr) => arr.indexOf(v) === i));
+  await exportButtons().nth(3).click();
+  const first = await waitLabel(3, /^(Descriptions|Saving|Downloaded|API key|Could not|Download failed)/);
+  await exportButtons().nth(3).click();
+  const dupe = await waitLabel(3, /^(Already running|Downloaded)/, 4000);
+  check('description job starts from the page; a second click does not start a duplicate', /^Descriptions \d+\/30/.test(first) && /^Already running/.test(dupe), `${first} | ${dupe}`);
+  await page.goto('https://www.youtube.com/@OtherCreator/videos'); // leave the page mid-job
+  const job = await waitJob((j) => ['done', 'failed', 'interrupted'].includes(j.state));
+  const files = await savedFile(job, /^FixtureTax-videos-video-descriptions-\d{4}-\d\d-\d\d\.txt$/);
+  check('job finished after leaving the page; success reported only for a completed download', job && job.state === 'done' && files.length === 1 && files[0].state === 'complete', `${job && job.state} ${job && job.filename}`);
+  const txt = files[0] ? readFileSync(files[0].filename, 'utf8') : '';
+  check('TXT header: channel, tab, sort, counts', txt.startsWith('TERNARY HOUSE — VIDEO DESCRIPTIONS\n\nChannel: Fixture Tax Pro\nChannel URL: https://www.youtube.com/@FixtureTax\nTab: Videos\nSort: Latest\nCaptured at (UTC): ')
+    && txt.includes('Total requested: 30\nDescriptions retrieved: 29\nEmpty descriptions: 0\nMissing/failed: 1\n'), txt.slice(0, 160));
+  const missingSection = txt.slice(txt.indexOf('# MISSING'), txt.indexOf('-'.repeat(125)));
+  check('# MISSING lists the omitted video with its page title, URL and ID', missingSection.includes(`Video ID: ${MISSING_ID}`) && missingSection.includes(`URL: ${wurl(MISSING_ID)}`) && /Title: Video 1005/.test(missingSection), missingSection.slice(0, 200));
+  const recordIds = [...txt.matchAll(/^Video ID: (\S+)$/gm)].map((m) => m[1]).slice(1);
+  check('records follow loaded page order (Premieres included), API order ignored', recordIds.join(',') === pageOrder.join(','), `${recordIds.length} records`);
+  check('descriptions verbatim (Unicode, codes, URLs, delimiter-like line)', txt.includes(`DESCRIPTION:\nОписание ${vid(1000)}\n\nSponsor: use code SAVE20 → https://example.com/?a=1&b=2\n${'-'.repeat(125)}\n00:00 Intro`));
+  check('API: part=snippet, ≤50 IDs per request, key never in the file', apiCalls.every((c) => c.part === 'snippet' && c.ids.length <= 50 && c.keyOk) && !txt.includes(API_KEY), `${apiCalls.length} request(s)`);
+  await bar().first().waitFor({ state: 'attached', timeout: 15000 });
+
+  await page.goto('https://www.youtube.com/playlist?list=PLpodcastAAAAAAAAA');
+  await bar().first().waitFor({ state: 'attached', timeout: 15000 });
+  await exportButtons().nth(1).click();
+  const pjob = await waitJob((j) => j.snapshot && j.snapshot.tab === 'playlist' && ['done', 'failed'].includes(j.state));
+  const pfiles = await savedFile(pjob, /^AbutaymiyyahMJ-playlist-video-descriptions-\d{4}-\d\d-\d\d\.txt$/);
+  const ptxt = pfiles[0] ? readFileSync(pfiles[0].filename, 'utf8') : '';
+  check('podcast episodes: TXT with owner channel, playlist line and 4 episodes', pjob && pjob.state === 'done'
+    && ptxt.includes('Channel: Abu Taymiyyah\nChannel URL: https://www.youtube.com/@AbutaymiyyahMJ\nTab: Podcast episodes / playlist\nPlaylist: Fixture Podcast — https://www.youtube.com/playlist?list=PLpodcastAAAAAAAAA\nSort: Playlist order')
+    && ptxt.includes('Total requested: 4\n'), ptxt.slice(0, 260));
+  const plabel = await waitLabel(1, /^Downloaded/, 5000);
+  check('button reports the finished download', plabel === 'Downloaded 4', plabel);
+
   console.log('\nNETWORK');
-  const outside = requests.filter((u) => !u.startsWith('https://www.youtube.com/') && !u.startsWith('https://i.ytimg.com/'));
-  check('no request outside the fixture origin and its thumbnails (none to googleapis)', outside.length === 0, outside.slice(0, 3).join(', '));
+  const outside = requests.filter((u) => !u.startsWith('https://www.youtube.com/') && !u.startsWith('https://i.ytimg.com/')
+    && !(u.startsWith('https://www.googleapis.com/youtube/v3/videos?') && new URL(u).searchParams.get('part') === 'snippet'));
+  check('no request outside the fixture origin except the descriptions videos.list?part=snippet calls', outside.length === 0, outside.slice(0, 3).join(', '));
 } finally {
   await context.close();
   rmSync(profile, { recursive: true, force: true });
